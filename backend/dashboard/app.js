@@ -2,7 +2,9 @@
 //  Finovert Admin Dashboard — app.js
 // ═══════════════════════════════════════════════════════════════════
 
-const API = window.location.origin + '/api';
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? window.location.origin + '/api'
+  : 'https://finovert-backend.onrender.com/api';
 let TOKEN = localStorage.getItem('finovert_token') || null;
 let currentTab = 'overview';
 

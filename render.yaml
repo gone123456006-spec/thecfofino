@@ -28,3 +28,9 @@ services:
         sync: false
       - key: DEMO_OTP_ENABLED
         value: "0"
+
+  - type: static
+    name: finovert-dashboard
+    rootDir: backend/dashboard
+    publishDir: .
+
