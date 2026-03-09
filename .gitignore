@@ -1,0 +1,15 @@
+node_modules/
+.expo/
+dist/
+build/
+.eas/
+*.log
+.DS_Store
+.env
+package-lock.json
+build_error*.json
+build_info*.txt
+otp_response.json
+otp_verify_get.json
+test_out.txt
+ts_errors.txt

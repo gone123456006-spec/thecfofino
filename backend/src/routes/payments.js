@@ -1,0 +1,5 @@
+// Placeholder — payment logic is handled inline in registrations.js
+// This file is kept for future standalone payment APIs
+const express = require('express');
+const router = express.Router();
+module.exports = router;

@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finovert Admin Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════ LOGIN SCREEN ═══════════════════════════════════ -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="login-logo-icon"><i class="fa-solid fa-shield-check"></i></div>
+        <h1>Finovert Admin</h1>
+        <p>Sign in to manage your dashboard</p>
+      </div>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>Username</label>
+          <div class="input-wrap">
+            <i class="fa-solid fa-user"></i>
+            <input type="text" id="login-username" placeholder="admin" required autocomplete="username" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="input-wrap">
+            <i class="fa-solid fa-lock"></i>
+            <input type="password" id="login-password" placeholder="••••••••" required
+              autocomplete="current-password" />
+          </div>
+        </div>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" id="login-btn" class="login-btn">
+          <span id="login-btn-text">Sign In</span>
+          <span id="login-btn-loader" class="hidden"><i class="fa-solid fa-circle-notch fa-spin"></i></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════ MAIN APP ═══════════════════════════════════ -->
+  <div id="app" class="app hidden">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-icon"><i class="fa-solid fa-shield-check"></i></div>
+        <div>
+          <div class="sidebar-brand-name">Finovert</div>
+          <div class="sidebar-brand-sub">Admin Panel</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">Main</div>
+        <a class="nav-item active" data-tab="overview" onclick="switchTab('overview')">
+          <i class="fa-solid fa-chart-pie"></i> Overview
+        </a>
+        <a class="nav-item" data-tab="registrations" onclick="switchTab('registrations')">
+          <i class="fa-solid fa-building"></i> Company Registrations
+          <span id="nav-reg-badge" class="nav-badge hidden"></span>
+        </a>
+        <a class="nav-item" data-tab="bookings" onclick="switchTab('bookings')">
+          <i class="fa-solid fa-phone"></i> Call Bookings
+          <span id="nav-book-badge" class="nav-badge hidden"></span>
+        </a>
+        <div class="nav-section-label">Customers</div>
+        <a class="nav-item" data-tab="customers" onclick="switchTab('customers')">
+          <i class="fa-solid fa-users"></i> All Customers
+        </a>
+        <a class="nav-item" data-tab="appusers" onclick="switchTab('appusers')">
+          <i class="fa-solid fa-mobile-screen"></i> App Users
+          <span id="nav-users-badge" class="nav-badge hidden"></span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <div class="sidebar-avatar"><i class="fa-solid fa-user-tie"></i></div>
+          <div>
+            <div id="sidebar-username" class="sidebar-uname">Admin</div>
+            <div class="sidebar-urole">Administrator</div>
+          </div>
+        </div>
+        <button class="logout-btn" onclick="handleLogout()" title="Logout">
+          <i class="fa-solid fa-right-from-bracket"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- Top Bar -->
+      <div class="topbar">
+        <div class="topbar-title" id="topbar-title">Overview</div>
+        <div class="topbar-actions">
+          <button class="btn btn-icon" onclick="refreshCurrentTab()" title="Refresh">
+            <i class="fa-solid fa-arrows-rotate"></i>
+          </button>
+          <div class="topbar-time" id="topbar-time"></div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: OVERVIEW ═══ -->
+      <div id="tab-overview" class="tab-content active">
+        <div class="stats-grid">
+          <div class="stat-card stat-blue">
+            <div class="stat-icon"><i class="fa-solid fa-building"></i></div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-total-reg">—</div>
+              <div class="stat-label">Total Registrations</div>
+            </div>
+          </div>
+          <div class="stat-card stat-orange">
+            <div class="stat-icon"><i class="fa-solid fa-hourglass-half"></i></div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-pending">—</div>
+              <div class="stat-label">Pending</div>
+            </div>
+          </div>
+          <div class="stat-card stat-green">
+            <div class="stat-icon"><i class="fa-solid fa-circle-check"></i></div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-completed">—</div>
+              <div class="stat-label">Completed</div>
+            </div>
+          </div>
+          <div class="stat-card stat-purple">
+            <div class="stat-icon"><i class="fa-solid fa-indian-rupee-sign"></i></div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-revenue">—</div>
+              <div class="stat-label">Total Revenue</div>
+            </div>
+          </div>
+          <div class="stat-card stat-teal">
+            <div class="stat-icon"><i class="fa-solid fa-phone"></i></div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-bookings">—</div>
+              <div class="stat-label">Call Bookings</div>
+            </div>
+          </div>
+          <div class="stat-card stat-red">
+            <div class="stat-icon"><i class="fa-solid fa-credit-card"></i></div>
+            <div class="stat-info">
+              <div class="stat-value" id="stat-unpaid">—</div>
+              <div class="stat-label">Unpaid</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="overview-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3>Recent Registrations</h3>
+              <a onclick="switchTab('registrations')" class="card-link">View all →</a>
+            </div>
+            <div id="recent-regs-list" class="recent-list">
+              <div class="loading-msg"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <h3>Recent Bookings <span class="card-badge"
+                  title="Refreshes every 30s when a new call is booked">Auto</span></h3>
+              <a onclick="switchTab('bookings')" class="card-link">View all →</a>
+            </div>
+            <div id="recent-books-list" class="recent-list">
+              <div class="loading-msg"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: REGISTRATIONS ═══ -->
+      <div id="tab-registrations" class="tab-content hidden">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="reg-search" placeholder="Search by Case ID, name, email, mobile…"
+              oninput="debounce(loadRegistrations, 400)()" />
+          </div>
+          <select id="reg-filter-status" onchange="loadRegistrations()" class="filter-select">
+            <option value="">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="Submitted">Submitted</option>
+            <option value="Initiated">Initiated</option>
+            <option value="Filed">Filed</option>
+            <option value="Approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <select id="reg-filter-payment" onchange="loadRegistrations()" class="filter-select">
+            <option value="">All Payment</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="partial">Partial</option>
+            <option value="paid">Paid</option>
+          </select>
+        </div>
+        <div class="card">
+          <div id="reg-table-wrap" class="table-wrap">
+            <div class="loading-msg"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: BOOKINGS ═══ -->
+      <div id="tab-bookings" class="tab-content hidden">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="book-search" placeholder="Search by name, mobile, purpose…"
+              oninput="debounce(loadBookings, 400)()" />
+          </div>
+          <select id="book-filter-status" onchange="loadBookings()" class="filter-select">
+            <option value="">All Statuses</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <span class="toolbar-hint" title="New app bookings appear here automatically">Auto-refresh 30s</span>
+        </div>
+        <div class="card">
+          <div id="book-table-wrap" class="table-wrap">
+            <div class="loading-msg"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: CUSTOMERS ═══ -->
+      <div id="tab-customers" class="tab-content hidden">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="cust-search" placeholder="Search customers…"
+              oninput="debounce(loadCustomers, 400)()" />
+          </div>
+        </div>
+        <div class="card">
+          <div id="cust-table-wrap" class="table-wrap">
+            <div class="loading-msg"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ TAB: APP USERS ═══ -->
+      <div id="tab-appusers" class="tab-content hidden">
+        <div class="toolbar">
+          <div class="search-wrap">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="appuser-search" placeholder="Search by name, mobile, email…"
+              oninput="debounce(loadAppUsers, 400)()" />
+          </div>
+        </div>
+        <div class="card">
+          <div id="appuser-table-wrap" class="table-wrap">
+            <div class="loading-msg"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading…</div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ════════════════════ MODALS ════════════════════ -->
+
+  <!-- Registration Detail Modal -->
+  <div id="reg-modal" class="modal-overlay hidden" onclick="closeModal('reg-modal')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2 id="modal-company-name">Company Details</h2>
+        <button class="modal-close" onclick="closeModal('reg-modal')"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="modal-reg-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Update Status Modal -->
+  <div id="status-modal" class="modal-overlay hidden" onclick="closeModal('status-modal')">
+    <div class="modal modal-sm" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Update Status</h2>
+        <button class="modal-close" onclick="closeModal('status-modal')"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="status-modal-id" />
+        <input type="hidden" id="status-modal-type" />
+        <div class="form-group">
+          <label>Status</label>
+          <select id="status-modal-select" class="filter-select" style="width:100%"></select>
+        </div>
+        <div class="form-group">
+          <label>Admin Notes</label>
+          <textarea id="status-modal-notes" class="modal-textarea" placeholder="Optional notes…"></textarea>
+        </div>
+        <div id="status-modal-schedule" class="form-group hidden">
+          <label>Schedule Call (optional)</label>
+          <input type="datetime-local" id="status-modal-date" class="filter-select" style="width:100%" />
+        </div>
+        <button class="btn btn-primary" onclick="submitStatusUpdate()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Modal -->
+  <div id="payment-modal" class="modal-overlay hidden" onclick="closeModal('payment-modal')">
+    <div class="modal modal-sm" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Mark Payment</h2>
+        <button class="modal-close" onclick="closeModal('payment-modal')"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="payment-modal-id" />
+        <div class="form-group">
+          <label>Payment Status</label>
+          <select id="payment-status-select" class="filter-select" style="width:100%">
+            <option value="unpaid">Unpaid</option>
+            <option value="partial">Partial</option>
+            <option value="paid">Paid</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Amount (₹)</label>
+          <input type="number" id="payment-amount" class="filter-select" style="width:100%" placeholder="0" />
+        </div>
+        <div class="form-group">
+          <label>Payment Method</label>
+          <select id="payment-method" class="filter-select" style="width:100%">
+            <option value="">Select method</option>
+            <option value="UPI">UPI</option>
+            <option value="NEFT">NEFT</option>
+            <option value="Cash">Cash</option>
+            <option value="Card">Card</option>
+            <option value="Cheque">Cheque</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Reference / UTR Number</label>
+          <input type="text" id="payment-ref" class="filter-select" style="width:100%"
+            placeholder="UTR / Transaction ID" />
+        </div>
+        <button class="btn btn-primary" onclick="submitPaymentUpdate()">Save Payment</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notification -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
