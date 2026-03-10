@@ -26,8 +26,7 @@ export type CompanyRegistrationPayload = {
 
 function getApiBase(): string {
   if (process.env.EXPO_PUBLIC_API_URL?.trim()) return process.env.EXPO_PUBLIC_API_URL.trim();
-  if (Platform.OS === 'android') return 'http://10.0.2.2:4000/api';
-  return 'http://localhost:4000/api';
+  return 'https://finovert-backend.onrender.com/api';
 }
 
 const getCompanyRegistrationApiUrl = (): string => {

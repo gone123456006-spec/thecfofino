@@ -11,8 +11,7 @@ const WELCOME_KEY = '@finoverts_welcome_seen';
 /** Backend API base. Set EXPO_PUBLIC_API_URL in .env for physical device (e.g. http://192.168.1.5:4000/api). */
 function getApiBase(): string {
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-  if (Platform.OS === 'android') return 'http://10.0.2.2:4000/api';
-  return 'http://localhost:4000/api';
+  return 'https://finovert-backend.onrender.com/api';
 }
 
 type User = {
