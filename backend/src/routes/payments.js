@@ -4,16 +4,30 @@ const Razorpay = require('razorpay');
 
 const router = express.Router();
 
-const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID,
-    key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+let razorpay = null;
+
+if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+    try {
+        razorpay = new Razorpay({
+            key_id: process.env.RAZORPAY_KEY_ID,
+            key_secret: process.env.RAZORPAY_KEY_SECRET,
+        });
+    } catch (err) {
+        console.error('Razorpay initialization error:', err.message);
+    }
+} else {
+    console.warn('⚠️ RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET is missing. Payments feature will not work.');
+}
 
 // ─── POST /api/payments/create-order ──────────────────────────────────────────
 // Body: { amount: number (INR), currency?: string, receipt?: string }
 // Returns: { orderId, amount, currency, keyId }
 router.post('/create-order', async (req, res) => {
     try {
+        if (!razorpay) {
+            return res.status(500).json({ ok: false, error: 'Payment gateway not configured' });
+        }
+
         const { amount = 749800, currency = 'INR', receipt = 'company_reg' } = req.body;
 
         // Razorpay amount is in paise (1 INR = 100 paise)
