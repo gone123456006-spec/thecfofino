@@ -6,7 +6,8 @@ export type DirectorDraft = {
   aadhaar: string;
   shareholding: string;
   panFileUri: string | null;
-  aadhaarFileUri: string | null;
+  aadhaarFrontFileUri: string | null;
+  aadhaarBackFileUri: string | null;
 };
 
 export type CompanyRegistrationDraft = {

@@ -142,7 +142,7 @@ const BUSINESS_TYPE_DATA: Record<BusinessType, BusinessTypeData> = {
 };
 
 // Registration Overview – local video
-const REGISTRATION_OVERVIEW_VIDEO = require('@/assets/vidoes/video of Registration .mp4');
+const REGISTRATION_OVERVIEW_VIDEO = require('@/assets/vidoes/Company Reg..mp4');
 const REGISTRATION_OVERVIEW_THUMB = require('@/assets/images/registration-overview-thumb.jpg');
 
 const SKIP_SECONDS = 10;
@@ -397,13 +397,8 @@ export default function CompanyRegistrationScreen() {
             <Text style={companyRegistrationStyles.selectedTypeLabel}>{selectedType}</Text>
           </View>
 
-          {/* Type-specific video */}
-          {/* Registration Overview Video */}
-          <Text style={companyRegistrationStyles.subSectionTitle}>1. How to register {selectedType}</Text>
-          <RegistrationOverviewVideo />
-
           {/* Documents */}
-          <Text style={companyRegistrationStyles.subSectionTitle}>2. Documents Required</Text>
+          <Text style={companyRegistrationStyles.subSectionTitle}>1. Documents Required</Text>
           <View style={companyRegistrationStyles.docList}>
             {(typeData.documents ?? []).map((doc) => (
               <View key={doc} style={companyRegistrationStyles.docItem}>
@@ -414,7 +409,7 @@ export default function CompanyRegistrationScreen() {
           </View>
 
           {/* Benefits */}
-          <Text style={companyRegistrationStyles.subSectionTitle}>3. Benefits</Text>
+          <Text style={companyRegistrationStyles.subSectionTitle}>2. Benefits</Text>
           {(typeData.benefits ?? []).map((benefit) => (
             <View key={benefit} style={companyRegistrationStyles.benefitItem}>
               <View style={companyRegistrationStyles.benefitIcon}>

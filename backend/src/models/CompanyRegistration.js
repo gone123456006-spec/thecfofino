@@ -6,7 +6,8 @@ const DirectorSchema = new mongoose.Schema({
     aadhaar: String,
     shareholding: String,
     panFileUri: String,
-    aadhaarFileUri: String,
+    aadhaarFrontFileUri: String,
+    aadhaarBackFileUri: String,
 });
 
 const CompanyRegistrationSchema = new mongoose.Schema({
@@ -42,13 +43,18 @@ const CompanyRegistrationSchema = new mongoose.Schema({
     assignedTo: String,
 }, {
     timestamps: true,
+    // Index on createdAt so sort({ createdAt: -1 }) uses the index instead of in-memory sort
+    // This prevents the 32 MB sort memory limit error when documents are large (e.g. base64 images)
 });
+
+CompanyRegistrationSchema.index({ createdAt: -1 });
 
 CompanyRegistrationSchema.pre('save', async function (next) {
     if (this.isNew && (!this.caseId || this.caseId === 'FINO112' || this.caseId.trim() === '')) {
         try {
             const lastReg = await this.constructor.findOne({ caseId: /^FINO-R-\d+$/ })
-                .sort({ createdAt: -1 });
+                .sort({ createdAt: -1 })
+                .allowDiskUse(true);
 
             let nextNum = 1001;
             if (lastReg && lastReg.caseId) {

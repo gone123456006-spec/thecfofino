@@ -1,4 +1,5 @@
-import { Dimensions, PixelRatio } from 'react-native';
+import { Dimensions, PixelRatio, useWindowDimensions } from 'react-native';
+import { useMemo } from 'react';
 
 // ─── Design baseline (375×812); scales for all mobile e.g. Pixel 7 (412×915) ─
 
@@ -43,3 +44,11 @@ export function createScalers(width: number, height: number) {
 }
 
 export type Scalers = ReturnType<typeof createScalers>;
+
+/**
+ * Hook to get dynamic scalers that update on dimension changes.
+ */
+export function useScalers(): Scalers {
+  const { width, height } = useWindowDimensions();
+  return useMemo(() => createScalers(width, height), [width, height]);
+}

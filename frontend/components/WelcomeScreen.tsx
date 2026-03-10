@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Dimensions,
   Image,
@@ -12,8 +12,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Colors } from '@/constants/theme';
-import { authStyles } from '@/styles/auth.styles';
+import { authStyles as createAuthStyles } from '@/styles/auth.styles';
 import { useAuth } from '@/contexts/AuthContext';
+import { useScalers } from '@/utils/responsive';
 
 const WELCOME_IMAGES = [
   'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800',
@@ -27,6 +28,8 @@ const AUTO_SLIDE_INTERVAL_MS = 3500;
 
 export function WelcomeScreen() {
   const { setHasSeenWelcome } = useAuth();
+  const scalers = useScalers();
+  const authStyles = useMemo(() => createAuthStyles(scalers), [scalers]);
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);

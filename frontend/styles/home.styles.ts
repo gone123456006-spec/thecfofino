@@ -16,8 +16,12 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
   const glassBgStrong = 'rgba(255,255,255,0.18)';
 
   return {
+    width,
     styles: StyleSheet.create({
       container: {
+        flex: 1,
+      },
+      fullScreenContainer: {
         flex: 1,
       },
       content: {
@@ -28,8 +32,6 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
 
       headerWrap: {
         overflow: 'hidden' as const,
-        borderBottomLeftRadius: sw(28),
-        borderBottomRightRadius: sw(28),
         backgroundColor: 'transparent',
         borderWidth: 0,
         borderTopWidth: 0,
@@ -38,8 +40,8 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: PADDING_H,
-        paddingVertical: sh(8),
-        paddingBottom: sh(14),
+        paddingVertical: sh(4),
+        paddingBottom: sh(8),
         backgroundColor: 'transparent',
         gap: sw(8),
       },
@@ -183,7 +185,7 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       topicsHeadingWrap: {
         alignSelf: 'center',
         zIndex: 1,
-        marginTop: sh(14),
+        marginTop: sh(6),
       },
       topicsHeading: {
         fontSize: ms(28),

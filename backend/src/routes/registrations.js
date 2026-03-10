@@ -28,7 +28,7 @@ router.post('/', async (req, res) => {
         const registration = new CompanyRegistration(data);
         if (data.directors && Array.isArray(data.directors)) {
             data.directors.forEach((d, i) => {
-                console.log(`POST Director ${i}: name="${d.name}", PAN len=${d.panFileUri?.length || 0}, Aadhaar len=${d.aadhaarFileUri?.length || 0}`);
+                console.log(`POST Director ${i}: name="${d.name}", PAN len=${d.panFileUri?.length || 0}, AadhaarFront len=${d.aadhaarFrontFileUri?.length || 0}, AadhaarBack len=${d.aadhaarBackFileUri?.length || 0}`);
             });
         }
         await registration.save();
@@ -55,7 +55,7 @@ router.put('/:id', async (req, res) => {
         console.log('UPDATE Registration body keys:', Object.keys(data));
         if (data.directors && Array.isArray(data.directors)) {
             data.directors.forEach((d, i) => {
-                console.log(`UPDATE Director ${i}: name="${d.name}", PAN len=${d.panFileUri?.length || 0}, Aadhaar len=${d.aadhaarFileUri?.length || 0}`);
+                console.log(`UPDATE Director ${i}: name="${d.name}", PAN len=${d.panFileUri?.length || 0}, AadhaarFront len=${d.aadhaarFrontFileUri?.length || 0}, AadhaarBack len=${d.aadhaarBackFileUri?.length || 0}`);
             });
             // Explictly set the directors array to trigger change detection in Mongoose
             registration.directors = data.directors;
@@ -77,6 +77,7 @@ router.get('/my', userAuth, async (req, res) => {
     try {
         const list = await CompanyRegistration.find({ userId: req.userId })
             .sort({ createdAt: -1 })
+            .allowDiskUse(true)
             .limit(10)
             .lean()
             .select('status paymentStatus caseId proposedName1 createdAt');
@@ -106,8 +107,10 @@ router.get('/', auth, async (req, res) => {
         const total = await CompanyRegistration.countDocuments(filter);
         const registrations = await CompanyRegistration.find(filter)
             .sort({ createdAt: -1 })
+            .allowDiskUse(true)
             .skip((page - 1) * limit)
-            .limit(Number(limit));
+            .limit(Number(limit))
+            .select('-directors.panFileUri -directors.aadhaarFrontFileUri -directors.aadhaarBackFileUri'); // exclude large base64 blobs from list view
 
         res.json({ ok: true, total, registrations });
     } catch (err) {
@@ -143,12 +146,18 @@ router.get('/stats', auth, async (req, res) => {
 router.get('/:id/directors/:dirIndex/:docType', auth, async (req, res) => {
     try {
         const { id, dirIndex, docType } = req.params;
-        if (!['pan', 'aadhaar'].includes(docType)) return res.status(400).json({ ok: false, error: 'Invalid docType' });
+        if (!['pan', 'aadhaar-front', 'aadhaar-back'].includes(docType)) return res.status(400).json({ ok: false, error: 'Invalid docType' });
         const reg = await CompanyRegistration.findById(id).lean();
         if (!reg || !reg.directors) return res.status(404).json({ ok: false, error: 'Not found' });
         const idx = parseInt(dirIndex, 10);
-        if (isNaN(idx) || idx < 0 || idx >= reg.directors.length) return res.status(404).json({ ok: false, error: 'Not found' });
-        const field = docType === 'pan' ? 'panFileUri' : 'aadhaarFileUri';
+        let field = '';
+        if (docType === 'pan') field = 'panFileUri';
+        else if (docType === 'aadhaar-front') field = 'aadhaarFrontFileUri';
+        else if (docType === 'aadhaar-back') field = 'aadhaarBackFileUri';
+
+        if (!field || isNaN(idx) || idx < 0 || idx >= reg.directors.length) {
+            return res.status(404).json({ ok: false, error: 'Document not found or invalid index/type' });
+        }
         const dataUrl = (reg.directors[idx][field] || '').trim();
         if (!dataUrl || !dataUrl.startsWith('data:')) {
             return res.status(404).json({ ok: false, error: 'Document not available' });

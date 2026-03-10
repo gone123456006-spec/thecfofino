@@ -1,8 +1,11 @@
 import { StyleSheet } from 'react-native';
 import { Colors } from '@/constants/theme';
-import { ms, sh, sw } from '@/utils/responsive';
+import { type Scalers } from '@/utils/responsive';
 
-export const authStyles = StyleSheet.create({
+/**
+ * Auth screens styles (Login, Register, OTP).
+ */
+export const authStyles = ({ sw, sh, ms }: Scalers) => StyleSheet.create({
   welcomeContainer: {
     flex: 1,
     backgroundColor: Colors.background,

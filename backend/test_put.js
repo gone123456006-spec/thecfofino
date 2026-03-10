@@ -49,7 +49,8 @@ async function run() {
                     aadhaar: '123412341234',
                     shareholding: '100',
                     panFileUri: mockImage,
-                    aadhaarFileUri: mockImage
+                    aadhaarFrontFileUri: mockImage,
+                    aadhaarBackFileUri: mockImage
                 }]
             })
         });

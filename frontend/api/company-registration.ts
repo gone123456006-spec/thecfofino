@@ -6,7 +6,8 @@ export type CompanyDirectorPayload = {
   aadhaar: string;
   shareholding: string;
   panFileUri: string | null;
-  aadhaarFileUri: string | null;
+  aadhaarFrontFileUri: string | null;
+  aadhaarBackFileUri: string | null;
 };
 
 export type CompanyRegistrationPayload = {
@@ -42,6 +43,7 @@ export type MyRegistrationItem = {
   caseId?: string;
   proposedName1?: string;
   createdAt: string;
+  directors?: any[];
 };
 
 export async function submitCompanyRegistrationToBackend(

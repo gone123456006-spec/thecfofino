@@ -24,7 +24,8 @@ async function checkAll() {
                 r.directors.forEach((d, j) => {
                     console.log(`  Director ${j + 1}: ${d.name}`);
                     console.log(`    PAN Length: ${d.panFileUri ? d.panFileUri.length : 0}`);
-                    console.log(`    Aadhaar Length: ${d.aadhaarFileUri ? d.aadhaarFileUri.length : 0}`);
+                    console.log(`    Aadhaar Front Length: ${d.aadhaarFrontFileUri ? d.aadhaarFrontFileUri.length : 0}`);
+                    console.log(`    Aadhaar Back Length: ${d.aadhaarBackFileUri ? d.aadhaarBackFileUri.length : 0}`);
                 });
             }
         });

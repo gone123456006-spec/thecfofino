@@ -424,7 +424,8 @@ async function openRegModal(id) {
             <div class="detail-item"><div class="detail-label">Aadhaar</div><div class="detail-value">${d.aadhaar || '—'}</div></div>
             <div class="detail-item"><div class="detail-label">Shareholding</div><div class="detail-value">${d.shareholding ? d.shareholding + '%' : '—'}</div></div>
             ${docImgHtml(r._id, i, 'PAN Card', d.panFileUri, 'pan', 'director-' + (i + 1) + '-pan')}
-            ${docImgHtml(r._id, i, 'Aadhaar Card', d.aadhaarFileUri, 'aadhaar', 'director-' + (i + 1) + '-aadhaar')}
+            ${docImgHtml(r._id, i, 'Aadhaar Front', d.aadhaarFrontFileUri, 'aadhaar-front', 'director-' + (i + 1) + '-aadhaar-front')}
+            ${docImgHtml(r._id, i, 'Aadhaar Back', d.aadhaarBackFileUri, 'aadhaar-back', 'director-' + (i + 1) + '-aadhaar-back')}
           </div>
         </div>`).join('')}
 

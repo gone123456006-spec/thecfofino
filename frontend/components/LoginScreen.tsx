@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,16 +17,18 @@ import { useRouter } from 'expo-router';
 
 import { HeaderLogo } from '@/constants/assets';
 import { Colors } from '@/constants/theme';
-import { authStyles } from '@/styles/auth.styles';
-import { ms, sh, sw } from '@/utils/responsive';
+import { authStyles as createAuthStyles } from '@/styles/auth.styles';
+import { useScalers } from '@/utils/responsive';
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 
 export function LoginScreen() {
+  const scalers = useScalers();
+  const { sh, sw, ms, height } = scalers;
+  const authStyles = useMemo(() => createAuthStyles(scalers), [scalers]);
   const { sendOtpWithDev, verifyWithDev } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
   const headerHeight = Math.min(height * 0.32, 220);
 
   const [name, setName] = useState('');
