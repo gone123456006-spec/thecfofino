@@ -4,35 +4,43 @@
     "slug": "finoverts",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/App logo .jpeg",
+    "icon": "./assets/images/New Logo App.png",
     "scheme": "finoverts",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.brandovert.finoverts",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Allow access to camera to take photos of documents.",
+        "NSPhotoLibraryUsageDescription": "Allow access to gallery to upload document photos."
       }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/App logo .jpeg"
+        "foregroundImage": "./assets/images/New Logo App.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.brandovert.finoverts"
+      "package": "com.brandovert.finoverts",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/App logo .jpeg"
+      "favicon": "./assets/images/New Logo App.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/App logo .jpeg",
+          "image": "./assets/images/New Logo App.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
@@ -42,7 +50,14 @@
         }
       ],
       "expo-web-browser",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow access to gallery to upload document photos.",
+          "cameraPermission": "Allow access to camera to take photos of documents."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

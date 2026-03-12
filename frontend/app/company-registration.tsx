@@ -142,7 +142,7 @@ const BUSINESS_TYPE_DATA: Record<BusinessType, BusinessTypeData> = {
 };
 
 // Registration Overview – local video
-const REGISTRATION_OVERVIEW_VIDEO = require('@/assets/vidoes/Company Reg..mp4');
+const REGISTRATION_OVERVIEW_VIDEO = require('@/assets/videos/company_registration.mp4');
 const REGISTRATION_OVERVIEW_THUMB = require('@/assets/images/registration-overview-thumb.jpg');
 
 const SKIP_SECONDS = 10;

@@ -144,38 +144,46 @@ export default function CompanyRegistrationFormScreen() {
   }, [uploadTarget]);
 
   const launchImagePicker = async (source: 'camera' | 'gallery'): Promise<string | null> => {
-    if (source === 'camera') {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Camera Permission Required',
-          'Please go to Settings → Privacy → Camera and allow access for this app.',
-        );
-        return null;
+    try {
+      if (source === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert(
+            'Camera Permission Required',
+            'We need access to your camera to take photos of documents. Please enable it in your device settings.',
+            [{ text: 'OK' }]
+          );
+          return null;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.7,
+          allowsEditing: false,
+          base64: false,
+        });
+        return result.canceled ? null : (result.assets?.[0]?.uri ?? null);
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert(
+            'Gallery Permission Required',
+            'We need access to your photos to upload documents. Please enable it in your device settings.',
+            [{ text: 'OK' }]
+          );
+          return null;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.7,
+          allowsEditing: false,
+          base64: false,
+        });
+        return result.canceled ? null : (result.assets?.[0]?.uri ?? null);
       }
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-        allowsEditing: false,
-        base64: false,
-      });
-      return result.canceled ? null : (result.assets?.[0]?.uri ?? null);
-    } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Gallery Permission Required',
-          'Please go to Settings → Privacy → Photos and allow access for this app.',
-        );
-        return null;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-        allowsEditing: false,
-        base64: false,
-      });
-      return result.canceled ? null : (result.assets?.[0]?.uri ?? null);
+    } catch (error) {
+      console.error('[launchImagePicker] Error:', error);
+      Alert.alert('Error', 'An unexpected error occurred while opening the camera or gallery.');
+      return null;
     }
   };
 
