@@ -143,6 +143,15 @@ export default function CompanyRegistrationFormScreen() {
     }
   }, [uploadTarget]);
 
+  useEffect(() => {
+    if (!uploadModalVisible && pendingPickTypeRef.current && uploadTarget) {
+      if (Platform.OS === 'android') {
+        const timer = setTimeout(() => onUploadModalDismiss(), 300);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [uploadModalVisible, uploadTarget, onUploadModalDismiss]);
+
   const launchImagePicker = async (source: 'camera' | 'gallery'): Promise<string | null> => {
     try {
       if (source === 'camera') {
