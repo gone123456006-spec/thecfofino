@@ -108,49 +108,38 @@ export default function CompanyRegistrationFormScreen() {
     setUploadModalVisible(true);
   }, []);
 
-  /** Step 2 – user picks an option; close modal and remember choice */
+  /** Step 2 – user picks an option; close modal, then wait an instant and launch picker */
   const handleUploadOption = useCallback((type: 'camera' | 'gallery' | 'pdf') => {
-    pendingPickTypeRef.current = type;
-    setUploadModalVisible(false); // onDismiss / onRequestClose will fire the picker
-  }, []);
+    setUploadModalVisible(false);
 
-  /** Step 3 – modal is fully gone; now open the native picker safely */
-  const onUploadModalDismiss = useCallback(async () => {
-    const type = pendingPickTypeRef.current;
     const target = uploadTarget;
-    pendingPickTypeRef.current = null;
+    if (!target || isPickingRef.current) return;
 
-    if (!type || !target || isPickingRef.current) return;
-    isPickingRef.current = true;
+    // A simple timeout is the most reliable cross-platform way to wait for the modal
+    // to visually dismiss before launching the native picker intent/UIViewController.
+    setTimeout(async () => {
+      isPickingRef.current = true;
+      try {
+        let uri: string | null = null;
 
-    try {
-      let uri: string | null = null;
+        if (type === 'pdf') {
+          uri = await launchDocumentPicker();
+        } else {
+          uri = await launchImagePicker(type);
+        }
 
-      if (type === 'pdf') {
-        uri = await launchDocumentPicker();
-      } else {
-        uri = await launchImagePicker(type);
+        if (uri) {
+          setDirectors((prev) =>
+            prev.map((d) => (d.id === target.directorId ? { ...d, [target.field]: uri } : d)),
+          );
+          clearError(directorErrorKey(target.directorId, target.field));
+        }
+      } finally {
+        isPickingRef.current = false;
+        // Optional: clear uploadTarget if needed
       }
-
-      if (uri) {
-        setDirectors((prev) =>
-          prev.map((d) => (d.id === target.directorId ? { ...d, [target.field]: uri } : d)),
-        );
-        clearError(directorErrorKey(target.directorId, target.field));
-      }
-    } finally {
-      isPickingRef.current = false;
-    }
+    }, Platform.OS === 'ios' ? 400 : 200);
   }, [uploadTarget]);
-
-  useEffect(() => {
-    if (!uploadModalVisible && pendingPickTypeRef.current && uploadTarget) {
-      if (Platform.OS === 'android') {
-        const timer = setTimeout(() => onUploadModalDismiss(), 300);
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [uploadModalVisible, uploadTarget, onUploadModalDismiss]);
 
   const launchImagePicker = async (source: 'camera' | 'gallery'): Promise<string | null> => {
     try {
@@ -487,16 +476,13 @@ export default function CompanyRegistrationFormScreen() {
       </Modal>
 
       {/* ── Upload Options Modal ── */}
-      {/* KEY FIX: onDismiss fires AFTER the modal is fully gone on both iOS & Android.
-          We then open the native picker from there — no setTimeout hacks needed. */}
       <Modal
         visible={uploadModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => { pendingPickTypeRef.current = null; setUploadModalVisible(false); }}
-        onDismiss={onUploadModalDismiss}   // iOS: fires after animation ends
+        onRequestClose={() => setUploadModalVisible(false)}
       >
-        <Pressable style={uploadStyles.overlay} onPress={() => { pendingPickTypeRef.current = null; setUploadModalVisible(false); }}>
+        <Pressable style={uploadStyles.overlay} onPress={() => setUploadModalVisible(false)}>
           <Pressable style={uploadStyles.sheet} onPress={(e) => e.stopPropagation()}>
             {/* Handle bar */}
             <View style={uploadStyles.handle} />
@@ -549,7 +535,7 @@ export default function CompanyRegistrationFormScreen() {
             {/* Cancel */}
             <Pressable
               style={uploadStyles.cancelBtn}
-              onPress={() => { pendingPickTypeRef.current = null; setUploadModalVisible(false); }}>
+              onPress={() => setUploadModalVisible(false)}>
               <Text style={uploadStyles.cancelText}>Cancel</Text>
             </Pressable>
           </Pressable>

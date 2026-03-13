@@ -59,6 +59,9 @@
         }
       ]
     ],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "experiments": {
       "typedRoutes": true
     },

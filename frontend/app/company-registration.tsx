@@ -263,21 +263,23 @@ function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) 
         <View
           style={(companyRegistrationStyles as Record<string, ViewStyle>).videoControlsOverlayFull}
           pointerEvents="box-none">
+          {/* Background area intercepts touches OUTSIDE the play button to hide controls */}
           <Pressable
-            style={(companyRegistrationStyles as Record<string, ViewStyle>).videoControlsTapArea}
-            onPress={toggleOverviewControls}>
-            <View style={(companyRegistrationStyles as Record<string, ViewStyle>).videoCentreControlsRow}>
-              <Pressable onPress={toggleOverviewPlayPause} hitSlop={6}>
-                <Animated.View style={[companyRegistrationStyles.videoCentrePlayBtn, playAnimatedStyle]}>
-                  <Ionicons
-                    name={overviewPlaying ? 'pause-circle' : 'play-circle'}
-                    size={sw(40)}
-                    color="#e0e0e0"
-                  />
-                </Animated.View>
-              </Pressable>
-            </View>
-          </Pressable>
+            style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }}
+            onPress={toggleOverviewControls}
+          />
+          {/* The actual play button rests on top with its own distinct touch target */}
+          <View style={(companyRegistrationStyles as Record<string, ViewStyle>).videoCentreControlsRow} pointerEvents="box-none">
+            <Pressable onPress={toggleOverviewPlayPause} hitSlop={15}>
+              <Animated.View style={[companyRegistrationStyles.videoCentrePlayBtn, playAnimatedStyle]}>
+                <Ionicons
+                  name={overviewPlaying ? 'pause-circle' : 'play-circle'}
+                  size={sw(40)}
+                  color="#e0e0e0"
+                />
+              </Animated.View>
+            </Pressable>
+          </View>
         </View>
       ) : (
         <Pressable
