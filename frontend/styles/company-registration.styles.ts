@@ -97,7 +97,7 @@ export const companyRegistrationStyles = StyleSheet.create({
   },
   videoControlsOverlayFull: {
     ...StyleSheet.absoluteFillObject,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
     backgroundColor: 'transparent',
   },
   videoControlsTapArea: {
@@ -106,10 +106,10 @@ export const companyRegistrationStyles = StyleSheet.create({
     alignItems: 'center',
   },
   videoCentreControlsRow: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: sw(10),
   },
   videoSkipBtn: {
     width: sw(36),
@@ -122,25 +122,42 @@ export const companyRegistrationStyles = StyleSheet.create({
   videoCentrePlayBtn: {
     width: sw(60),
     height: sw(60),
+    borderRadius: sw(30),
+    backgroundColor: 'rgba(0,0,0,0.04)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: sh(45),
   },
   videoControlsBottomBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: sw(8),
-    paddingVertical: sh(5),
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: sw(12),
+    paddingBottom: sh(10),
+    backgroundColor: 'transparent',
+  },
+  videoProgressBarContainer: {
+    flex: 1,
+    height: 3,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    marginHorizontal: sw(10),
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  videoProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#333333',
   },
   videoTimeText: {
-    fontSize: ms(10),
-    color: '#fff',
+    fontSize: ms(11),
+    color: '#333333',
+    fontWeight: '500',
+    minWidth: sw(60),
   },
   videoBottomBarRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: sw(4),
+    gap: sw(12),
+    marginLeft: sw(10),
   },
   videoControlBtnSmall: {
     width: sw(28),

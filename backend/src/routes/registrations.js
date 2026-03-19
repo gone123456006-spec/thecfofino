@@ -80,7 +80,7 @@ router.get('/my', userAuth, async (req, res) => {
             .allowDiskUse(true)
             .limit(10)
             .lean()
-            .select('status paymentStatus caseId proposedName1 createdAt');
+            .select('status paymentStatus paymentAmount caseId proposedName1 createdAt businessType');
         res.json({ ok: true, registrations: list });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

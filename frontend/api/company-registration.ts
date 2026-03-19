@@ -39,8 +39,10 @@ export type MyRegistrationItem = {
   _id: string;
   status: string;
   paymentStatus: string;
+  paymentAmount?: number;
   caseId?: string;
   proposedName1?: string;
+  businessType?: string;
   createdAt: string;
   directors?: any[];
 };

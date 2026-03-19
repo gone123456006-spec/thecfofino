@@ -21,7 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { AVPlaybackStatus, ResizeMode, Video } from 'expo-av';
+import { Video, ResizeMode, AVPlaybackStatus, Audio } from 'expo-av';
 
 import { Colors } from '@/constants/theme';
 import { companyRegistrationStyles } from '@/styles/company-registration.styles';
@@ -142,7 +142,7 @@ const BUSINESS_TYPE_DATA: Record<BusinessType, BusinessTypeData> = {
 };
 
 // Registration Overview – local video
-const REGISTRATION_OVERVIEW_VIDEO = require('@/assets/videos/company_registration.mp4');
+const REGISTRATION_OVERVIEW_VIDEO = require('@/assets/videos/Registration Overview Video 1.mp4');
 const REGISTRATION_OVERVIEW_THUMB = require('@/assets/images/registration-overview-thumb.jpg');
 
 const SKIP_SECONDS = 10;
@@ -156,19 +156,60 @@ function formatVideoTime(ms: number): string {
 }
 
 function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) {
+  const videoRef = useRef<Video>(null);
   const [overviewPlaying, setOverviewPlaying] = useState(false);
-  const [overviewMuted, setOverviewMuted] = useState(true);
+  const [overviewMuted, setOverviewMuted] = useState(false);
   const [overviewControlsVisible, setOverviewControlsVisible] = useState(true);
-  const overviewVideoRef = useRef<Video>(null);
+  const [showThumbnail, setShowThumbnail] = useState(true);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
   const controlsHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onOverviewPlaybackStatusUpdate = (status: AVPlaybackStatus) => {
+  useEffect(() => {
+    // Configure audio to play even on silent mode (iOS)
+    Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      shouldDuckAndroid: true,
+      staysActiveInBackground: false,
+      playThroughEarpieceAndroid: false,
+    });
+  }, []);
+
+  const toggleOverviewPlayPause = async () => {
+    if (videoRef.current) {
+      if (overviewPlaying) {
+        await videoRef.current.pauseAsync();
+      } else {
+        await videoRef.current.playAsync();
+      }
+    }
+  };
+
+  const toggleOverviewMute = async () => {
+    const newMutedState = !overviewMuted;
+    if (videoRef.current) {
+      await videoRef.current.setIsMutedAsync(newMutedState);
+    }
+    setOverviewMuted(newMutedState);
+  };
+
+  const toggleOverviewControls = () => {
+    setOverviewControlsVisible((v) => !v);
+  };
+
+  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
     if (!status.isLoaded) return;
+    
     setOverviewPlaying(status.isPlaying);
-    setOverviewMuted(status.isMuted ?? false);
+    setPosition(status.positionMillis || 0);
+    setDuration(status.durationMillis || 0);
+    
     if (status.isPlaying) {
-      if (controlsHideTimeoutRef.current) clearTimeout(controlsHideTimeoutRef.current);
-      controlsHideTimeoutRef.current = setTimeout(() => setOverviewControlsVisible(false), 2000);
+      setShowThumbnail(false);
+      if (!controlsHideTimeoutRef.current) {
+        controlsHideTimeoutRef.current = setTimeout(() => setOverviewControlsVisible(false), 3000);
+      }
     } else {
       if (controlsHideTimeoutRef.current) {
         clearTimeout(controlsHideTimeoutRef.current);
@@ -178,32 +219,7 @@ function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) 
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (controlsHideTimeoutRef.current) clearTimeout(controlsHideTimeoutRef.current);
-    };
-  }, []);
-
-  const toggleOverviewPlayPause = async () => {
-    try {
-      if (overviewPlaying) {
-        await overviewVideoRef.current?.pauseAsync();
-      } else {
-        await overviewVideoRef.current?.playAsync();
-      }
-    } catch (_) { }
-  };
-
-  const toggleOverviewMute = async () => {
-    try {
-      await overviewVideoRef.current?.setIsMutedAsync(!overviewMuted);
-      setOverviewMuted((m) => !m);
-    } catch (_) { }
-  };
-
-  const toggleOverviewControls = () => {
-    setOverviewControlsVisible((v) => !v);
-  };
+  const progress = duration > 0 ? (position / duration) * 100 : 0;
 
   // Play button pulse animation
   const playScale = useSharedValue(1);
@@ -225,61 +241,63 @@ function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) 
   return (
     <View style={[companyRegistrationStyles.videoWrap, customStyle]}>
       <Video
-        ref={overviewVideoRef}
+        ref={videoRef}
         source={REGISTRATION_OVERVIEW_VIDEO}
         style={companyRegistrationStyles.videoThumbnail}
-        useNativeControls={false}
         resizeMode={ResizeMode.COVER}
-        shouldPlay={false}
+        isLooping={false}
         isMuted={overviewMuted}
-        usePoster={true}
-        posterSource={REGISTRATION_OVERVIEW_THUMB}
-        posterStyle={{ width: '100%', height: '100%', resizeMode: 'cover' }}
-        progressUpdateIntervalMillis={500}
-        onPlaybackStatusUpdate={onOverviewPlaybackStatusUpdate}
+        shouldPlay={false}
+        onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
+        useNativeControls={false}
       />
 
-      {/* Persistent Mute Button */}
-      <Pressable
-        style={{
-          position: 'absolute',
-          bottom: sh(10),
-          right: sw(10),
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          padding: sw(3),
-          borderRadius: sw(20),
-          zIndex: 10,
-        }}
-        onPress={toggleOverviewMute}
-        hitSlop={10}>
-        <Ionicons
-          name={overviewMuted ? 'volume-mute' : 'volume-high'}
-          size={sw(12)}
-          color="#fff"
+      {showThumbnail && (
+        <Image 
+          source={REGISTRATION_OVERVIEW_THUMB} 
+          style={companyRegistrationStyles.videoThumbnail}
+          resizeMode="cover"
         />
-      </Pressable>
+      )}
+
 
       {overviewControlsVisible ? (
         <View
           style={(companyRegistrationStyles as Record<string, ViewStyle>).videoControlsOverlayFull}
           pointerEvents="box-none">
-          {/* Background area intercepts touches OUTSIDE the play button to hide controls */}
+          {/* Top area for play button centering */}
           <Pressable
-            style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }}
-            onPress={toggleOverviewControls}
-          />
-          {/* The actual play button rests on top with its own distinct touch target */}
-          <View style={(companyRegistrationStyles as Record<string, ViewStyle>).videoCentreControlsRow} pointerEvents="box-none">
-            <Pressable onPress={toggleOverviewPlayPause} hitSlop={15}>
+            style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+            onPress={toggleOverviewControls}>
+            <Pressable onPress={toggleOverviewPlayPause} hitSlop={20}>
               <Animated.View style={[companyRegistrationStyles.videoCentrePlayBtn, playAnimatedStyle]}>
                 <Ionicons
-                  name={overviewPlaying ? 'pause-circle' : 'play-circle'}
-                  size={sw(40)}
-                  color="#e0e0e0"
+                  name={overviewPlaying ? 'pause' : 'play'}
+                  size={sw(32)}
+                  color="#333333"
                 />
               </Animated.View>
             </Pressable>
-          </View>
+          </Pressable>
+
+          {/* Bottom Control Bar - Only show when video has started playing */}
+          {!showThumbnail && (
+            <View style={(companyRegistrationStyles as Record<string, ViewStyle>).videoControlsBottomBar}>
+              <Text style={companyRegistrationStyles.videoTimeText}>
+                {formatVideoTime(position)} / {formatVideoTime(duration)}
+              </Text>
+
+              <View style={companyRegistrationStyles.videoProgressBarContainer}>
+                <View style={[companyRegistrationStyles.videoProgressBarFill, { width: `${progress}%` }]} />
+              </View>
+
+              <View style={companyRegistrationStyles.videoBottomBarRight}>
+                <Pressable onPress={toggleOverviewMute}>
+                  <Ionicons name={overviewMuted ? 'volume-mute' : 'volume-high'} size={sw(16)} color="#333333" />
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
       ) : (
         <Pressable

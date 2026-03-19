@@ -207,6 +207,10 @@ export default function CompanyRegistrationUploadTrackingScreen() {
   const [localStatus, setLocalStatus] = useState<string>('draft');
   const [caseId, setCaseId] = useState<string | null>(null);
   const [directors, setDirectors] = useState<any[]>([]);
+  const [paymentAmount, setPaymentAmount] = useState<number | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
+  const [businessType, setBusinessType] = useState<string | null>(null);
+  const [proposedName1, setProposedName1] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -234,6 +238,10 @@ export default function CompanyRegistrationUploadTrackingScreen() {
           const latest = list?.[0];
           if (latest?.status) setServerStatus(latest.status.toLowerCase());
           if (latest?.caseId && !caseId) setCaseId(latest.caseId);
+          if (latest?.paymentAmount !== undefined) setPaymentAmount(latest.paymentAmount);
+          if (latest?.paymentStatus) setPaymentStatus(latest.paymentStatus);
+          if (latest?.businessType) setBusinessType(latest.businessType);
+          if (latest?.proposedName1) setProposedName1(latest.proposedName1);
           // Merge latest director docs if server has them
           if (latest?.directors?.length) setDirectors(latest.directors);
         }
@@ -411,6 +419,42 @@ export default function CompanyRegistrationUploadTrackingScreen() {
           <Text style={s.approvedText}>
             🎉 Congratulations! Your company incorporation is approved and complete.
           </Text>
+        </View>
+      )}
+
+      {/* ── Review & Payment ── */}
+      {(paymentAmount !== null || paymentStatus) && (
+        <View style={s.card}>
+          <View style={s.cardHeader}>
+            <Ionicons name="card-outline" size={17} color="#6366f1" />
+            <Text style={s.cardTitle}>Review & Payment</Text>
+          </View>
+          <View style={{ padding: 16 }}>
+            <View style={ps.row}>
+              <Text style={ps.label}>Company Name</Text>
+              <Text style={ps.value}>{proposedName1 || '—'}</Text>
+            </View>
+            <View style={ps.row}>
+              <Text style={ps.label}>Service</Text>
+              <Text style={ps.value}>{businessType || 'Company Registration'}</Text>
+            </View>
+            <View style={[ps.row, { borderBottomWidth: 0, marginBottom: 12 }]}>
+              <Text style={ps.label}>Total Fee</Text>
+              <Text style={ps.amount}>₹{(paymentAmount ?? 0).toLocaleString('en-IN')}</Text>
+            </View>
+            
+            <View style={[ps.statusBox, paymentStatus === 'paid' ? ps.statusPaid : ps.statusUnpaid]}>
+               <Text style={[ps.statusText, paymentStatus === 'paid' ? ps.statusTextPaid : ps.statusTextUnpaid]}>
+                 {paymentStatus === 'paid' ? 'Payment Received' : paymentStatus === 'partial' ? 'Partial Payment Received' : 'Payment Pending'}
+               </Text>
+            </View>
+
+            {paymentStatus !== 'paid' && (
+              <Pressable style={ps.payBtn} onPress={() => Alert.alert('Payment Details', 'Account Name: Finovert Services\nBank: HDFC Bank\nIFSC: HDFC0001234\n\nPlease share the payment screenshot with your Case ID on support.')}>
+                <Text style={ps.payBtnText}>PROCEED TO PAYMENT</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
       )}
 
@@ -660,4 +704,19 @@ const ds = StyleSheet.create({
   lightboxBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center', zIndex: 999 },
   lightboxImg: { width: '92%', height: '75%' },
   lightboxClose: { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 24, right: 20 },
+});
+
+const ps = StyleSheet.create({
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  label: { fontSize: 13, color: '#6b7280' },
+  value: { fontSize: 13, fontWeight: '600', color: '#111827', flex: 1, textAlign: 'right', marginLeft: 12 },
+  amount: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  statusBox: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+  statusUnpaid: { backgroundColor: '#fef3c7' },
+  statusPaid: { backgroundColor: '#d1fae5' },
+  statusText: { fontSize: 12, fontWeight: '700' },
+  statusTextUnpaid: { color: '#92400e' },
+  statusTextPaid: { color: '#065f46' },
+  payBtn: { backgroundColor: INDIGO, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 4 },
+  payBtnText: { color: '#fff', fontSize: 14, fontWeight: '700', letterSpacing: 0.5 },
 });

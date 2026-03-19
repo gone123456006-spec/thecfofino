@@ -431,7 +431,7 @@ async function openRegModal(id) {
 
       <div style="display:flex;gap:10px;margin-top:20px">
         <button class="btn btn-primary" onclick="closeModal('reg-modal');openStatusModal('${r._id}','registration')">Update Status</button>
-        <button class="btn btn-success" onclick="closeModal('reg-modal');openPaymentModal('${r._id}')">Mark Payment</button>
+        <button class="btn btn-success" onclick="closeModal('reg-modal');openPaymentModal('${r._id}')">Update Payment</button>
       </div>
     `;
     loadDocImages(document.getElementById('modal-reg-body'));
@@ -631,12 +631,32 @@ async function submitStatusUpdate() {
 
 // ─── PAYMENT MODAL ─────────────────────────────────────────────────
 
-function openPaymentModal(id) {
+async function openPaymentModal(id) {
   document.getElementById('payment-modal-id').value = id;
-  document.getElementById('payment-amount').value = '';
-  document.getElementById('payment-ref').value = '';
-  document.getElementById('payment-method').value = '';
-  document.getElementById('payment-status-select').value = 'unpaid';
+  const amtInput = document.getElementById('payment-amount');
+  const refInput = document.getElementById('payment-ref');
+  const methodInput = document.getElementById('payment-method');
+  const statusInput = document.getElementById('payment-status-select');
+
+  // Set defaults
+  amtInput.value = '';
+  refInput.value = '';
+  methodInput.value = '';
+  statusInput.value = 'unpaid';
+
+  try {
+    const data = await apiFetch('/registrations/' + id);
+    const r = data.registration;
+    if (r) {
+      if (r.paymentAmount !== undefined) amtInput.value = r.paymentAmount;
+      if (r.paymentReference) refInput.value = r.paymentReference;
+      if (r.paymentMethod) methodInput.value = r.paymentMethod;
+      if (r.paymentStatus) statusInput.value = r.paymentStatus;
+    }
+  } catch (err) {
+    console.warn('Failed to pre-fill payment modal:', err);
+  }
+
   openModal('payment-modal');
 }
 

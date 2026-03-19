@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -31,9 +32,7 @@ import {
   saveCompanyRegistrationState,
   setCompanyRegistrationDraft,
 } from '@/utils/company-registration-draft';
-import { ms, sh, sw } from '@/utils/responsive';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
+import { ms, sh } from '@/utils/responsive';
 
 type Director = {
   id: string;
@@ -46,32 +45,184 @@ type Director = {
   aadhaarBackFileUri: string | null;
 };
 
+type UploadField = 'panFileUri' | 'aadhaarFrontFileUri' | 'aadhaarBackFileUri';
+
 type UploadTarget = {
   directorId: string;
-  field: 'panFileUri' | 'aadhaarFrontFileUri' | 'aadhaarBackFileUri';
+  field: UploadField;
   title: string;
 } | null;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+type PickType = 'camera' | 'gallery' | 'pdf';
 
 const directorErrorKey = (
   id: string,
-  field: 'name' | 'pan' | 'aadhaar' | 'shareholding' | 'panFileUri' | 'aadhaarFrontFileUri' | 'aadhaarBackFileUri',
+  field: 'name' | 'pan' | 'aadhaar' | 'shareholding' | UploadField,
 ) => `director.${id}.${field}`;
 
-// ─── Component ───────────────────────────────────────────────────────────────
+const getMime = (uri: string): string => {
+  const l = uri.toLowerCase().split('?')[0];
+  if (l.endsWith('.pdf')) return 'application/pdf';
+  if (l.endsWith('.png')) return 'image/png';
+  if (l.endsWith('.webp')) return 'image/webp';
+  return 'image/jpeg';
+};
+
+// ── Standalone pickers (outside component — no stale-closure risk) ────────────
+
+// FIX #1: Use string literal 'images' — MediaTypeOptions is deprecated and
+// silently breaks picker launch on some Android builds.
+async function pickFromCamera(): Promise<string | null> {
+  const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
+  if (status !== 'granted') {
+    Alert.alert(
+      'Camera Permission Required',
+      canAskAgain
+        ? 'Please allow camera access when prompted.'
+        : 'Camera was denied. Enable in Settings → App → Permissions → Camera.',
+      [{ text: 'OK' }],
+    );
+    return null;
+  }
+  try {
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: 'images',
+      quality: 0.6,
+      allowsEditing: false,
+      base64: false,
+    });
+    if (result.canceled || !result.assets?.length) return null;
+    return result.assets[0].uri;
+  } catch (err) {
+    console.error('[pickFromCamera]', err);
+    Alert.alert('Camera Error', 'Could not open camera. Please try again.');
+    return null;
+  }
+}
+
+async function pickFromGallery(): Promise<string | null> {
+  const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (status !== 'granted') {
+    Alert.alert(
+      'Gallery Permission Required',
+      canAskAgain
+        ? 'Please allow photo access when prompted.'
+        : 'Gallery was denied. Enable in Settings → App → Permissions → Photos.',
+      [{ text: 'OK' }],
+    );
+    return null;
+  }
+  try {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      quality: 0.6,
+      allowsEditing: false,
+      base64: false,
+    });
+    if (result.canceled || !result.assets?.length) return null;
+    return result.assets[0].uri;
+  } catch (err) {
+    console.error('[pickFromGallery]', err);
+    Alert.alert('Gallery Error', 'Could not open gallery. Please try again.');
+    return null;
+  }
+}
+
+async function pickPdf(): Promise<string | null> {
+  try {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: 'application/pdf',
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.canceled || !result.assets?.length) return null;
+    return result.assets[0].uri;
+  } catch (err) {
+    console.error('[pickPdf]', err);
+    Alert.alert('Document Error', 'Could not open document picker. Please try again.');
+    return null;
+  }
+}
+
+// FIX #2: Android ImagePicker returns content:// URIs. expo-file-system cannot
+// read content:// directly — it needs a file:// URI. Copy to cache first, then read.
+// This is the #1 silent failure cause on Android APKs.
+async function uriToBase64(uri: string | null): Promise<string | null> {
+  if (!uri) return null;
+  if (uri.startsWith('data:')) return uri;
+
+  const mime = getMime(uri);
+  const isImage = mime.startsWith('image/');
+
+  const readFileUri = async (fileUri: string): Promise<string | null> => {
+    try {
+      const b64 = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      if (!b64) return null;
+      return `data:${mime};base64,${b64}`;
+    } catch {
+      return null;
+    }
+  };
+
+  // FIX: Android ImagePicker returns content:// URIs. Also, raw device photos are
+  // often 5-10MB which exhausts MongoDB's 16MB limit when base64-encoded.
+  // We resize to a max of 1200px width to keep payload small.
+  let workingUri = uri;
+  let tempUriToRemove: string | null = null;
+
+  if (isImage) {
+    try {
+      const manip = await manipulateAsync(
+        uri,
+        [{ resize: { width: 1200 } }],
+        { compress: 0.7, format: SaveFormat.JPEG }
+      );
+      workingUri = manip.uri;
+      tempUriToRemove = manip.uri;
+    } catch (e) {
+      console.warn('[uriToBase64] Resize failed, using original', e);
+    }
+  }
+
+  try {
+    let result: string | null = null;
+    if (workingUri.startsWith('file://')) {
+      result = await readFileUri(workingUri);
+    } else {
+      // Handle content:// or other URIs by copying to cache
+      const rawExt = workingUri.split('.').pop()?.split('?')[0] ?? 'jpg';
+      const ext = ['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(rawExt) ? rawExt : 'jpg';
+      const dest = `${FileSystem.cacheDirectory ?? ''}upload_tmp_${Date.now()}.${ext}`;
+      await FileSystem.copyAsync({ from: workingUri, to: dest });
+      result = await readFileUri(dest);
+      FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => { });
+    }
+
+    // Cleanup temp manipulated file if created
+    if (tempUriToRemove && tempUriToRemove.startsWith('file://')) {
+      FileSystem.deleteAsync(tempUriToRemove, { idempotent: true }).catch(() => { });
+    }
+
+    return result;
+  } catch (err) {
+    console.error('[uriToBase64] failed:', err);
+    return null;
+  }
+}
 
 export default function CompanyRegistrationFormScreen() {
   const router = useRouter();
   const { getToken } = useAuth();
   const { addNotification } = useNotifications();
   const { businessType } = useLocalSearchParams<{ businessType?: string }>();
-  const [resolvedBusinessType, setResolvedBusinessType] = useState(businessType || '');
+
+  const [resolvedBusinessType, setResolvedBusinessType] = useState(businessType ?? '');
   const [activeSection, setActiveSection] = useState<'company' | 'director'>('company');
   const [caseId, setCaseId] = useState<string | null>(null);
   const [mongoId, setMongoId] = useState<string | null>(null);
 
-  // Section A
   const [proposedName1, setProposedName1] = useState('');
   const [proposedName2, setProposedName2] = useState('');
   const [proposedName3, setProposedName3] = useState('');
@@ -81,15 +232,16 @@ export default function CompanyRegistrationFormScreen() {
   const [companyMobile, setCompanyMobile] = useState('');
   const [companyEmail, setCompanyEmail] = useState('');
 
-  // Section B
   const [directors, setDirectors] = useState<Director[]>([
-    { id: '1', name: '', pan: '', aadhaar: '', shareholding: '', panFileUri: null, aadhaarFrontFileUri: null, aadhaarBackFileUri: null },
+    { id: 'dir-1', name: '', pan: '', aadhaar: '', shareholding: '', panFileUri: null, aadhaarFrontFileUri: null, aadhaarBackFileUri: null },
   ]);
 
-  // Upload modal — stores WHAT to upload; picker fires AFTER modal fully hides
-  const [uploadTarget, setUploadTarget] = useState<UploadTarget>(null);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  const pendingPickTypeRef = useRef<'camera' | 'gallery' | 'pdf' | null>(null);
+
+  // FIX #3: Store target and pick type in refs only — never depend on React
+  // state inside async picker callbacks. State is async/batched; refs are instant.
+  const uploadTargetRef = useRef<UploadTarget>(null);
+  const pendingPickTypeRef = useRef<PickType | null>(null);
   const isPickingRef = useRef(false);
 
   const [confirmedDisclaimer, setConfirmedDisclaimer] = useState(false);
@@ -99,135 +251,90 @@ export default function CompanyRegistrationFormScreen() {
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
 
-  // ── Upload flow ────────────────────────────────────────────────────────────
-
-  /** Step 1 – open the choice modal */
   const openUploadModal = useCallback((target: UploadTarget) => {
+    if (isPickingRef.current) return;
+    uploadTargetRef.current = target;
     pendingPickTypeRef.current = null;
-    setUploadTarget(target);
     setUploadModalVisible(true);
   }, []);
 
-  /** Step 2 – user picks an option; close modal, then wait an instant and launch picker */
-  const handleUploadOption = useCallback((type: 'camera' | 'gallery' | 'pdf') => {
+  const handleUploadOption = useCallback((pickType: PickType) => {
+    if (!uploadTargetRef.current || isPickingRef.current) return;
+    pendingPickTypeRef.current = pickType;
     setUploadModalVisible(false);
+    // onDismiss fires after animation completes → launches picker (see handleModalDismiss)
+  }, []);
 
-    const target = uploadTarget;
-    if (!target || isPickingRef.current) return;
+  // FIX #4: Use onDismiss instead of setTimeout.
+  // onDismiss fires precisely when the modal animation is done and the Activity
+  // is fully foregrounded. setTimeout is unreliable on slow Android devices —
+  // too short = black screen, too long = noticeable lag.
+  const handleModalDismiss = useCallback(async () => {
+    const pickType = pendingPickTypeRef.current;
+    const target = uploadTargetRef.current;
+    pendingPickTypeRef.current = null;
 
-    // A simple timeout is the most reliable cross-platform way to wait for the modal
-    // to visually dismiss before launching the native picker intent/UIViewController.
-    setTimeout(async () => {
-      isPickingRef.current = true;
-      try {
-        let uri: string | null = null;
+    if (!pickType || !target || isPickingRef.current) return;
+    isPickingRef.current = true;
 
-        if (type === 'pdf') {
-          uri = await launchDocumentPicker();
-        } else {
-          uri = await launchImagePicker(type);
-        }
-
-        if (uri) {
-          setDirectors((prev) =>
-            prev.map((d) => (d.id === target.directorId ? { ...d, [target.field]: uri } : d)),
-          );
-          clearError(directorErrorKey(target.directorId, target.field));
-        }
-      } finally {
-        isPickingRef.current = false;
-        // Optional: clear uploadTarget if needed
-      }
-    }, Platform.OS === 'ios' ? 400 : 200);
-  }, [uploadTarget]);
-
-  const launchImagePicker = async (source: 'camera' | 'gallery'): Promise<string | null> => {
     try {
-      if (source === 'camera') {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'Camera Permission Required',
-            'We need access to your camera to take photos of documents. Please enable it in your device settings.',
-            [{ text: 'OK' }]
-          );
-          return null;
-        }
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.7,
-          allowsEditing: false,
-          base64: false,
+      let uri: string | null = null;
+      if (pickType === 'camera') uri = await pickFromCamera();
+      else if (pickType === 'gallery') uri = await pickFromGallery();
+      else uri = await pickPdf();
+
+      if (uri) {
+        setDirectors((prev) =>
+          prev.map((d) => (d.id === target.directorId ? { ...d, [target.field]: uri } : d)),
+        );
+        setErrors((prev) => {
+          const key = directorErrorKey(target.directorId, target.field);
+          if (!prev[key]) return prev;
+          const next = { ...prev };
+          delete next[key];
+          return next;
         });
-        return result.canceled ? null : (result.assets?.[0]?.uri ?? null);
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'Gallery Permission Required',
-            'We need access to your photos to upload documents. Please enable it in your device settings.',
-            [{ text: 'OK' }]
-          );
-          return null;
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.7,
-          allowsEditing: false,
-          base64: false,
-        });
-        return result.canceled ? null : (result.assets?.[0]?.uri ?? null);
       }
-    } catch (error) {
-      console.error('[launchImagePicker] Error:', error);
-      Alert.alert('Error', 'An unexpected error occurred while opening the camera or gallery.');
-      return null;
+    } finally {
+      isPickingRef.current = false;
     }
-  };
+  }, []);
 
-  const launchDocumentPicker = async (): Promise<string | null> => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/pdf'],
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      if (result.canceled) return null;
-      return result.assets?.[0]?.uri ?? null;
-    } catch (e) {
-      console.warn('[launchDocumentPicker]', e);
-      Alert.alert('Error', 'Could not open document picker. Please try again.');
-      return null;
-    }
-  };
-
-  // ── Directors helpers ──────────────────────────────────────────────────────
-
-  const addDirector = () =>
+  const addDirector = useCallback(() => {
     setDirectors((prev) => [
       ...prev,
-      { id: String(Date.now()), name: '', pan: '', aadhaar: '', shareholding: '', panFileUri: null, aadhaarFrontFileUri: null, aadhaarBackFileUri: null },
+      { id: `dir-${Date.now()}`, name: '', pan: '', aadhaar: '', shareholding: '', panFileUri: null, aadhaarFrontFileUri: null, aadhaarBackFileUri: null },
     ]);
+  }, []);
 
-  const removeDirector = (id: string) => {
-    if (directors.length <= 1) return;
-    setDirectors((prev) => prev.filter((d) => d.id !== id));
+  const removeDirector = useCallback((id: string) => {
+    setDirectors((prev) => prev.length <= 1 ? prev : prev.filter((d) => d.id !== id));
     setErrors((prev) => {
       const next = { ...prev };
       Object.keys(next).forEach((k) => { if (k.startsWith(`director.${id}.`)) delete next[k]; });
       return next;
     });
-  };
+  }, []);
 
-  const updateDirector = (id: string, field: 'name' | 'pan' | 'aadhaar' | 'shareholding', value: string) => {
+  const updateDirector = useCallback((id: string, field: 'name' | 'pan' | 'aadhaar' | 'shareholding', value: string) => {
     setDirectors((prev) => prev.map((d) => (d.id === id ? { ...d, [field]: value } : d)));
-    clearError(directorErrorKey(id, field));
-  };
+    setErrors((prev) => {
+      const key = directorErrorKey(id, field);
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
-  const clearError = (key: string) =>
-    setErrors((prev) => { if (!prev[key]) return prev; const n = { ...prev }; delete n[key]; return n; });
-
-  // ── Validation ─────────────────────────────────────────────────────────────
+  const clearError = useCallback((key: string) => {
+    setErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const validateSectionA = (): Record<string, string> => {
     const next: Record<string, string> = {};
@@ -255,7 +362,13 @@ export default function CompanyRegistrationFormScreen() {
     return next;
   };
 
-  // ── Hydration / draft persistence ─────────────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      // Proactive permission requests — avoids interruption during the upload flow.
+      void ImagePicker.requestCameraPermissionsAsync();
+      void ImagePicker.requestMediaLibraryPermissionsAsync();
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -275,8 +388,14 @@ export default function CompanyRegistrationFormScreen() {
         setCompanyEmail(d.companyEmail || '');
         if (d.directors?.length) {
           setDirectors(d.directors.map((dir: any, idx: number) => ({
-            id: `${idx + 1}-${Date.now()}-${idx}`,
-            ...dir,
+            id: dir.id ?? `dir-${idx}-${Date.now()}`,
+            name: dir.name ?? '',
+            pan: dir.pan ?? '',
+            aadhaar: dir.aadhaar ?? '',
+            shareholding: dir.shareholding ?? '',
+            panFileUri: dir.panFileUri ?? null,
+            aadhaarFrontFileUri: dir.aadhaarFrontFileUri ?? null,
+            aadhaarBackFileUri: dir.aadhaarBackFileUri ?? null,
           })));
         }
       }
@@ -285,64 +404,34 @@ export default function CompanyRegistrationFormScreen() {
       }
       setIsHydrated(true);
     })();
-  }, [businessType]);
+  }, []);
 
   useEffect(() => { if (businessType) setResolvedBusinessType(businessType); }, [businessType]);
 
   useEffect(() => {
     if (!isHydrated || alreadySubmitted) return;
-    const draft = {
-      ...(caseId ? { caseId } : {}),
-      ...(mongoId ? { _id: mongoId } : {}),
-      businessType: resolvedBusinessType,
-      proposedName1: proposedName1.trim(),
-      proposedName2: proposedName2.trim(),
-      proposedName3: proposedName3.trim(),
-      businessActivity: businessActivity.trim(),
-      registeredAddress: registeredAddress.trim(),
-      capitalStructure: capitalStructure.trim(),
-      companyMobile: companyMobile.trim(),
-      companyEmail: companyEmail.trim(),
-      directors: directors.map((d) => ({
-        name: d.name.trim(), pan: d.pan.trim(), aadhaar: d.aadhaar.trim(),
-        shareholding: d.shareholding.trim(), panFileUri: d.panFileUri, aadhaarFrontFileUri: d.aadhaarFrontFileUri, aadhaarBackFileUri: d.aadhaarBackFileUri,
-      })),
-    };
-    setCompanyRegistrationDraft(draft);
-    void saveCompanyRegistrationState({ draft, status: 'draft' });
-  }, [isHydrated, alreadySubmitted, caseId, mongoId, businessType, resolvedBusinessType,
-    proposedName1, proposedName2, proposedName3, businessActivity, registeredAddress,
-    capitalStructure, companyMobile, companyEmail, directors]);
-
-  // ── File → base64 ─────────────────────────────────────────────────────────
-
-  const uriToDataUrl = async (uri: string | null): Promise<string | null> => {
-    if (!uri) return null;
-    if (uri.startsWith('data:')) return uri;
-    const getMime = (u: string) => {
-      const l = u.toLowerCase();
-      if (l.endsWith('.pdf')) return 'application/pdf';
-      if (l.endsWith('.png')) return 'image/png';
-      if (l.endsWith('.webp')) return 'image/webp';
-      return 'image/jpeg';
-    };
-    const tryRead = async (u: string) => {
-      try {
-        const b64 = await FileSystem.readAsStringAsync(u, { encoding: FileSystem.EncodingType.Base64 });
-        return `data:${getMime(uri)};base64,${b64}`;
-      } catch { return null; }
-    };
-    const direct = await tryRead(uri);
-    if (direct) return direct;
-    try {
-      const filename = (uri.split('/').pop() || `doc_${Date.now()}`).replace(/[^a-zA-Z0-9._-]/g, '_');
-      const dest = `${FileSystem.documentDirectory || ''}${filename}`;
-      await FileSystem.copyAsync({ from: uri, to: dest });
-      return tryRead(dest);
-    } catch { return null; }
-  };
-
-  // ── Submit handlers ────────────────────────────────────────────────────────
+    const timer = setTimeout(() => {
+      const draft = {
+        ...(caseId ? { caseId } : {}),
+        ...(mongoId ? { _id: mongoId } : {}),
+        businessType: resolvedBusinessType,
+        proposedName1: proposedName1.trim(), proposedName2: proposedName2.trim(),
+        proposedName3: proposedName3.trim(), businessActivity: businessActivity.trim(),
+        registeredAddress: registeredAddress.trim(), capitalStructure: capitalStructure.trim(),
+        companyMobile: companyMobile.trim(), companyEmail: companyEmail.trim(),
+        directors: directors.map((d) => ({
+          id: d.id, name: d.name.trim(), pan: d.pan.trim(), aadhaar: d.aadhaar.trim(),
+          shareholding: d.shareholding.trim(), panFileUri: d.panFileUri,
+          aadhaarFrontFileUri: d.aadhaarFrontFileUri, aadhaarBackFileUri: d.aadhaarBackFileUri,
+        })),
+      };
+      setCompanyRegistrationDraft(draft);
+      void saveCompanyRegistrationState({ draft, status: 'draft' });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [isHydrated, alreadySubmitted, caseId, mongoId, resolvedBusinessType,
+    proposedName1, proposedName2, proposedName3, businessActivity,
+    registeredAddress, capitalStructure, companyMobile, companyEmail, directors]);
 
   const handleNext = async () => {
     const errs = validateSectionA();
@@ -360,8 +449,9 @@ export default function CompanyRegistrationFormScreen() {
         registeredAddress: registeredAddress.trim(), capitalStructure: capitalStructure.trim(),
         companyMobile: companyMobile.trim(), companyEmail: companyEmail.trim(),
         directors: directors.map((d) => ({
-          name: d.name.trim(), pan: d.pan.trim(), aadhaar: d.aadhaar.trim(),
-          shareholding: d.shareholding.trim(), panFileUri: d.panFileUri, aadhaarFrontFileUri: d.aadhaarFrontFileUri, aadhaarBackFileUri: d.aadhaarBackFileUri,
+          id: d.id, name: d.name.trim(), pan: d.pan.trim(), aadhaar: d.aadhaar.trim(),
+          shareholding: d.shareholding.trim(), panFileUri: d.panFileUri,
+          aadhaarFrontFileUri: d.aadhaarFrontFileUri, aadhaarBackFileUri: d.aadhaarBackFileUri,
         })),
       };
       const token = await getToken();
@@ -374,7 +464,7 @@ export default function CompanyRegistrationFormScreen() {
       }
       const genCaseId = result.caseId || caseId;
       if (genCaseId) setCaseId(genCaseId);
-      const full = { ...draft, caseId: genCaseId || undefined, _id: result.id || mongoId || undefined };
+      const full = { ...draft, caseId: genCaseId ?? undefined, _id: (result.id || mongoId) ?? undefined };
       setCompanyRegistrationDraft(full);
       void saveCompanyRegistrationState({ draft: full, status: 'draft' });
     } catch (e) {
@@ -403,15 +493,18 @@ export default function CompanyRegistrationFormScreen() {
     setIsSubmitting(true);
     setSubmitDone(false);
     try {
-      const directorsWithB64 = await Promise.all(
-        directors.map(async (d) => ({
+      // FIX #5: Sequential base64 conversion — not parallel Promise.all.
+      // On low-RAM Android, simultaneous large file reads exhaust the JS heap silently.
+      const directorsWithB64: any[] = [];
+      for (const d of directors) {
+        directorsWithB64.push({
           name: d.name.trim(), pan: d.pan.trim(), aadhaar: d.aadhaar.trim(),
           shareholding: d.shareholding.trim(),
-          panFileUri: await uriToDataUrl(d.panFileUri),
-          aadhaarFrontFileUri: await uriToDataUrl(d.aadhaarFrontFileUri),
-          aadhaarBackFileUri: await uriToDataUrl(d.aadhaarBackFileUri),
-        })),
-      );
+          panFileUri: await uriToBase64(d.panFileUri),
+          aadhaarFrontFileUri: await uriToBase64(d.aadhaarFrontFileUri),
+          aadhaarBackFileUri: await uriToBase64(d.aadhaarBackFileUri),
+        });
+      }
       const payload = {
         ...(caseId ? { caseId } : {}),
         businessType: resolvedBusinessType,
@@ -434,10 +527,7 @@ export default function CompanyRegistrationFormScreen() {
         submittedAt: new Date().toISOString(), paymentStatus: 'unpaid',
       });
       setAlreadySubmitted(true);
-      addNotification({
-        title: 'Company Registration Submitted',
-        body: 'Your details are submitted successfully. Complete payment to continue filing.',
-      });
+      addNotification({ title: 'Company Registration Submitted', body: 'Your details are submitted successfully. Complete payment to continue filing.' });
       setSubmitDone(true);
       setTimeout(() => { setIsSubmitting(false); router.push('/company-registration-review-paywall'); }, 1200);
     } catch (e) {
@@ -446,11 +536,8 @@ export default function CompanyRegistrationFormScreen() {
     }
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <>
-      {/* Submit modal */}
       <Modal visible={isSubmitting} transparent animationType="fade">
         <View style={companyRegistrationFormStyles.submitModalOverlay}>
           <View style={companyRegistrationFormStyles.submitModalCard}>
@@ -458,59 +545,50 @@ export default function CompanyRegistrationFormScreen() {
               <>
                 <Ionicons name="checkmark-circle" size={52} color="#22c55e" />
                 <Text style={companyRegistrationFormStyles.submitModalTitle}>Done!</Text>
-                <Text style={companyRegistrationFormStyles.submitModalSubtitle}>
-                  Your details have been submitted successfully.
-                </Text>
+                <Text style={companyRegistrationFormStyles.submitModalSubtitle}>Your details have been submitted successfully.</Text>
               </>
             ) : (
               <>
                 <ActivityIndicator size="large" color={Colors.primary} />
                 <Text style={companyRegistrationFormStyles.submitModalTitle}>Submitting your document…</Text>
-                <Text style={companyRegistrationFormStyles.submitModalSubtitle}>
-                  Please wait while we save your details.
-                </Text>
+                <Text style={companyRegistrationFormStyles.submitModalSubtitle}>Please wait while we save your details.</Text>
               </>
             )}
           </View>
         </View>
       </Modal>
 
-      {/* ── Upload Options Modal ── */}
       <Modal
         visible={uploadModalVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setUploadModalVisible(false)}
+        statusBarTranslucent
+        onDismiss={handleModalDismiss}
+        onRequestClose={() => {
+          pendingPickTypeRef.current = null;
+          setUploadModalVisible(false);
+        }}
       >
-        <Pressable style={uploadStyles.overlay} onPress={() => setUploadModalVisible(false)}>
-          <Pressable style={uploadStyles.sheet} onPress={(e) => e.stopPropagation()}>
-            {/* Handle bar */}
+        <Pressable
+          style={uploadStyles.overlay}
+          onPress={() => { pendingPickTypeRef.current = null; setUploadModalVisible(false); }}
+        >
+          <Pressable style={uploadStyles.sheet} onPress={() => { }}>
             <View style={uploadStyles.handle} />
-
-            <Text style={uploadStyles.title}>{uploadTarget?.title ?? 'Upload Document'}</Text>
+            <Text style={uploadStyles.title}>{uploadTargetRef.current?.title ?? 'Upload Document'}</Text>
             <Text style={uploadStyles.subtitle}>Choose file type (JPEG, PNG or PDF)</Text>
 
-            {/* Take Photo */}
-            <Pressable
-              style={({ pressed }) => [uploadStyles.option, pressed && uploadStyles.optionPressed]}
-              onPress={() => handleUploadOption('camera')}>
-              <View style={uploadStyles.iconWrap}>
-                <Ionicons name="camera" size={26} color={Colors.primary} />
-              </View>
+            <Pressable style={({ pressed }) => [uploadStyles.option, pressed && uploadStyles.optionPressed]} onPress={() => handleUploadOption('camera')}>
+              <View style={uploadStyles.iconWrap}><Ionicons name="camera" size={26} color={Colors.primary} /></View>
               <View style={uploadStyles.optionText}>
                 <Text style={uploadStyles.optionTitle}>Take Photo</Text>
-                <Text style={uploadStyles.optionDesc}>Use camera to capture</Text>
+                <Text style={uploadStyles.optionDesc}>Use camera to capture document</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
             </Pressable>
 
-            {/* Gallery */}
-            <Pressable
-              style={({ pressed }) => [uploadStyles.option, pressed && uploadStyles.optionPressed]}
-              onPress={() => handleUploadOption('gallery')}>
-              <View style={uploadStyles.iconWrap}>
-                <Ionicons name="images" size={26} color={Colors.primary} />
-              </View>
+            <Pressable style={({ pressed }) => [uploadStyles.option, pressed && uploadStyles.optionPressed]} onPress={() => handleUploadOption('gallery')}>
+              <View style={uploadStyles.iconWrap}><Ionicons name="images" size={26} color={Colors.primary} /></View>
               <View style={uploadStyles.optionText}>
                 <Text style={uploadStyles.optionTitle}>Gallery</Text>
                 <Text style={uploadStyles.optionDesc}>JPEG or PNG from photos</Text>
@@ -518,123 +596,70 @@ export default function CompanyRegistrationFormScreen() {
               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
             </Pressable>
 
-            {/* PDF */}
-            <Pressable
-              style={({ pressed }) => [uploadStyles.option, pressed && uploadStyles.optionPressed]}
-              onPress={() => handleUploadOption('pdf')}>
-              <View style={uploadStyles.iconWrap}>
-                <Ionicons name="document-text" size={26} color={Colors.primary} />
-              </View>
+            <Pressable style={({ pressed }) => [uploadStyles.option, pressed && uploadStyles.optionPressed]} onPress={() => handleUploadOption('pdf')}>
+              <View style={uploadStyles.iconWrap}><Ionicons name="document-text" size={26} color={Colors.primary} /></View>
               <View style={uploadStyles.optionText}>
                 <Text style={uploadStyles.optionTitle}>PDF Document</Text>
-                <Text style={uploadStyles.optionDesc}>Select PDF file</Text>
+                <Text style={uploadStyles.optionDesc}>Select PDF file from storage</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
             </Pressable>
 
-            {/* Cancel */}
-            <Pressable
-              style={uploadStyles.cancelBtn}
-              onPress={() => setUploadModalVisible(false)}>
+            <Pressable style={uploadStyles.cancelBtn} onPress={() => { pendingPickTypeRef.current = null; setUploadModalVisible(false); }}>
               <Text style={uploadStyles.cancelText}>Cancel</Text>
             </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
 
-      {/* ── Main Form ── */}
       <KeyboardAvoidingView
         style={companyRegistrationFormStyles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
         <ScrollView
           style={companyRegistrationFormStyles.container}
           contentContainerStyle={companyRegistrationFormStyles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled">
-
-          {/* Progress bar */}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={companyRegistrationFormStyles.progressBar}>
             <View style={[companyRegistrationFormStyles.progressStep, activeSection === 'company' ? companyRegistrationFormStyles.progressStepActive : companyRegistrationFormStyles.progressStepDone]} />
             <View style={[companyRegistrationFormStyles.progressStep, activeSection === 'director' ? companyRegistrationFormStyles.progressStepActive : activeSection === 'company' ? undefined : companyRegistrationFormStyles.progressStepDone]} />
           </View>
 
           {Object.keys(errors).length > 0 && (
-            <Text style={companyRegistrationFormStyles.validationHint}>
-              Missing details in red fields. Please complete them.
-            </Text>
+            <Text style={companyRegistrationFormStyles.validationHint}>Missing details in red fields. Please complete them.</Text>
           )}
-
           {!!resolvedBusinessType && (
-            <Text style={{ fontSize: ms(14), color: Colors.textMuted, marginBottom: sh(16) }}>
-              Business type: {resolvedBusinessType}
-            </Text>
+            <Text style={{ fontSize: ms(14), color: Colors.textMuted, marginBottom: sh(16) }}>Business type: {resolvedBusinessType}</Text>
           )}
 
-          {/* ── Section A ── */}
           <View style={companyRegistrationFormStyles.section}>
             <Text style={companyRegistrationFormStyles.sectionTitle}>Section A – Company Details</Text>
 
             <Text style={companyRegistrationFormStyles.sectionSubtitle}>Proposed Names (3)</Text>
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.proposedName1 && companyRegistrationFormStyles.inputError]}
-              value={proposedName1}
-              onChangeText={(v) => { setProposedName1(v); clearError('proposedName1'); }}
-              placeholder="Proposed name 1"
-              placeholderTextColor={Colors.textMuted}
-              onFocus={() => setActiveSection('company')}
-            />
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline]}
-              value={proposedName2} onChangeText={setProposedName2}
-              placeholder="Proposed name 2" placeholderTextColor={Colors.textMuted} />
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline]}
-              value={proposedName3} onChangeText={setProposedName3}
-              placeholder="Proposed name 3" placeholderTextColor={Colors.textMuted} />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.proposedName1 && companyRegistrationFormStyles.inputError]} value={proposedName1} onChangeText={(v) => { setProposedName1(v); clearError('proposedName1'); }} placeholder="Proposed name 1" placeholderTextColor={Colors.textMuted} onFocus={() => setActiveSection('company')} />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline]} value={proposedName2} onChangeText={setProposedName2} placeholder="Proposed name 2" placeholderTextColor={Colors.textMuted} />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline]} value={proposedName3} onChangeText={setProposedName3} placeholder="Proposed name 3" placeholderTextColor={Colors.textMuted} />
 
             <Text style={companyRegistrationFormStyles.sectionSubtitle}>Business Activity</Text>
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputMultiline, companyRegistrationFormStyles.inputNoOutline, errors.businessActivity && companyRegistrationFormStyles.inputError]}
-              value={businessActivity}
-              onChangeText={(v) => { setBusinessActivity(v); clearError('businessActivity'); }}
-              placeholder="Describe your business activity" placeholderTextColor={Colors.textMuted} multiline />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputMultiline, companyRegistrationFormStyles.inputNoOutline, errors.businessActivity && companyRegistrationFormStyles.inputError]} value={businessActivity} onChangeText={(v) => { setBusinessActivity(v); clearError('businessActivity'); }} placeholder="Describe your business activity" placeholderTextColor={Colors.textMuted} multiline />
 
             <Text style={companyRegistrationFormStyles.sectionSubtitle}>Registered Address</Text>
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputMultiline, companyRegistrationFormStyles.inputNoOutline, errors.registeredAddress && companyRegistrationFormStyles.inputError]}
-              value={registeredAddress}
-              onChangeText={(v) => { setRegisteredAddress(v); clearError('registeredAddress'); }}
-              placeholder="Full registered office address" placeholderTextColor={Colors.textMuted} multiline />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputMultiline, companyRegistrationFormStyles.inputNoOutline, errors.registeredAddress && companyRegistrationFormStyles.inputError]} value={registeredAddress} onChangeText={(v) => { setRegisteredAddress(v); clearError('registeredAddress'); }} placeholder="Full registered office address" placeholderTextColor={Colors.textMuted} multiline />
 
             <Text style={companyRegistrationFormStyles.sectionSubtitle}>Company Mobile Number</Text>
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.companyMobile && companyRegistrationFormStyles.inputError]}
-              value={companyMobile}
-              onChangeText={(v) => { setCompanyMobile(v); clearError('companyMobile'); }}
-              placeholder="e.g. 9876543210" placeholderTextColor={Colors.textMuted}
-              keyboardType="phone-pad" maxLength={10} />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.companyMobile && companyRegistrationFormStyles.inputError]} value={companyMobile} onChangeText={(v) => { setCompanyMobile(v); clearError('companyMobile'); }} placeholder="e.g. 9876543210" placeholderTextColor={Colors.textMuted} keyboardType="phone-pad" maxLength={10} />
 
             <Text style={companyRegistrationFormStyles.sectionSubtitle}>Company Email (Gmail ID)</Text>
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.companyEmail && companyRegistrationFormStyles.inputError]}
-              value={companyEmail}
-              onChangeText={(v) => { setCompanyEmail(v); clearError('companyEmail'); }}
-              placeholder="e.g. company@gmail.com" placeholderTextColor={Colors.textMuted}
-              keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.companyEmail && companyRegistrationFormStyles.inputError]} value={companyEmail} onChangeText={(v) => { setCompanyEmail(v); clearError('companyEmail'); }} placeholder="e.g. company@gmail.com" placeholderTextColor={Colors.textMuted} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
 
             <Text style={companyRegistrationFormStyles.sectionSubtitle}>Capital Structure</Text>
-            <TextInput
-              style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.capitalStructure && companyRegistrationFormStyles.inputError]}
-              value={capitalStructure}
-              onChangeText={(v) => { setCapitalStructure(v); clearError('capitalStructure'); }}
-              placeholder="e.g. ₹1,00,000" placeholderTextColor={Colors.textMuted} keyboardType="numeric" />
+            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.capitalStructure && companyRegistrationFormStyles.inputError]} value={capitalStructure} onChangeText={(v) => { setCapitalStructure(v); clearError('capitalStructure'); }} placeholder="e.g. ₹1,00,000" placeholderTextColor={Colors.textMuted} keyboardType="numeric" />
 
             {!caseId && (
-              <Pressable
-                style={companyRegistrationFormStyles.nextButton}
-                onPress={handleNext}
-                disabled={isSubmitting || alreadySubmitted}>
+              <Pressable style={companyRegistrationFormStyles.nextButton} onPress={handleNext} disabled={isSubmitting || alreadySubmitted}>
                 <Text style={companyRegistrationFormStyles.nextButtonText}>Next</Text>
                 <Ionicons name="arrow-forward" size={20} color="#fff" />
               </Pressable>
@@ -645,18 +670,13 @@ export default function CompanyRegistrationFormScreen() {
             <View style={companyRegistrationFormStyles.caseCard}>
               <Text style={companyRegistrationFormStyles.caseCardTitle}>Your Case ID</Text>
               <Text style={companyRegistrationFormStyles.caseIdText} selectable>{caseId}</Text>
-              <Text style={companyRegistrationFormStyles.caseCardHint}>
-                Complete director details below and submit. This case will appear in the dashboard.
-              </Text>
+              <Text style={companyRegistrationFormStyles.caseCardHint}>Complete director details below and submit. This case will appear in the dashboard.</Text>
             </View>
           )}
 
-          {/* ── Section B ── */}
           <View style={companyRegistrationFormStyles.section}>
             <View style={companyRegistrationFormStyles.sectionHeaderRow}>
-              <Text style={[companyRegistrationFormStyles.sectionTitle, companyRegistrationFormStyles.sectionTitleCompact]}>
-                Section B – Director Details
-              </Text>
+              <Text style={[companyRegistrationFormStyles.sectionTitle, companyRegistrationFormStyles.sectionTitleCompact]}>Section B – Director Details</Text>
               <Pressable style={companyRegistrationFormStyles.addDirectorBtn} onPress={addDirector}>
                 <Ionicons name="add-circle" size={24} color={Colors.primary} />
                 <Text style={companyRegistrationFormStyles.addDirectorBtnText}>Add Director</Text>
@@ -675,72 +695,28 @@ export default function CompanyRegistrationFormScreen() {
                 </View>
 
                 <Text style={companyRegistrationFormStyles.label}>Name</Text>
-                <TextInput
-                  style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'name')] && companyRegistrationFormStyles.inputError]}
-                  value={director.name}
-                  onChangeText={(v) => updateDirector(director.id, 'name', v)}
-                  placeholder="Director full name" placeholderTextColor={Colors.textMuted}
-                  onFocus={() => setActiveSection('director')} />
+                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'name')] && companyRegistrationFormStyles.inputError]} value={director.name} onChangeText={(v) => updateDirector(director.id, 'name', v)} placeholder="Director full name" placeholderTextColor={Colors.textMuted} onFocus={() => setActiveSection('director')} />
 
                 <Text style={companyRegistrationFormStyles.label}>PAN</Text>
-                <TextInput
-                  style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'pan')] && companyRegistrationFormStyles.inputError]}
-                  value={director.pan}
-                  onChangeText={(v) => updateDirector(director.id, 'pan', v)}
-                  placeholder="PAN number" placeholderTextColor={Colors.textMuted}
-                  autoCapitalize="characters" maxLength={10} />
+                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'pan')] && companyRegistrationFormStyles.inputError]} value={director.pan} onChangeText={(v) => updateDirector(director.id, 'pan', v)} placeholder="PAN number" placeholderTextColor={Colors.textMuted} autoCapitalize="characters" maxLength={10} />
 
-                {/* PAN upload */}
-                <Pressable
-                  style={[
-                    uploadStyles.uploadBtn,
-                    errors[directorErrorKey(director.id, 'panFileUri')] && uploadStyles.uploadBtnError,
-                    director.panFileUri && uploadStyles.uploadBtnSuccess,
-                  ]}
-                  onPress={() => openUploadModal({ directorId: director.id, field: 'panFileUri', title: 'Upload PAN Card' })}>
+                <Pressable style={[uploadStyles.uploadBtn, errors[directorErrorKey(director.id, 'panFileUri')] && uploadStyles.uploadBtnError, director.panFileUri ? uploadStyles.uploadBtnSuccess : null]} onPress={() => openUploadModal({ directorId: director.id, field: 'panFileUri', title: 'Upload PAN Card' })}>
                   <Ionicons name={director.panFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.panFileUri ? '#fff' : Colors.primary} />
-                  <Text style={[uploadStyles.uploadBtnText, director.panFileUri && uploadStyles.uploadBtnTextSuccess]}>
-                    {director.panFileUri ? 'PAN uploaded ✓' : 'Upload PAN (JPEG / PDF)'}
-                  </Text>
+                  <Text style={[uploadStyles.uploadBtnText, director.panFileUri ? uploadStyles.uploadBtnTextSuccess : null]}>{director.panFileUri ? 'PAN uploaded ✓' : 'Upload PAN (JPEG / PDF)'}</Text>
                 </Pressable>
-                {director.panFileUri && (
-                  <Text style={uploadStyles.savedTag}>✔ Document saved </Text>
-                )}
+                {director.panFileUri && <Text style={uploadStyles.savedTag}>✔ Document saved</Text>}
+
                 <Text style={companyRegistrationFormStyles.label}>Aadhaar</Text>
-                <TextInput
-                  style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'aadhaar')] && companyRegistrationFormStyles.inputError]}
-                  value={director.aadhaar}
-                  onChangeText={(v) => updateDirector(director.id, 'aadhaar', v)}
-                  placeholder="Aadhaar number" placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad" maxLength={12} />
+                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'aadhaar')] && companyRegistrationFormStyles.inputError]} value={director.aadhaar} onChangeText={(v) => updateDirector(director.id, 'aadhaar', v)} placeholder="Aadhaar number" placeholderTextColor={Colors.textMuted} keyboardType="number-pad" maxLength={12} />
 
-                {/* Aadhaar Front upload */}
-                <Pressable
-                  style={[
-                    uploadStyles.uploadBtn,
-                    errors[directorErrorKey(director.id, 'aadhaarFrontFileUri')] && uploadStyles.uploadBtnError,
-                    director.aadhaarFrontFileUri && uploadStyles.uploadBtnSuccess,
-                  ]}
-                  onPress={() => openUploadModal({ directorId: director.id, field: 'aadhaarFrontFileUri', title: 'Upload Aadhaar (Front)' })}>
+                <Pressable style={[uploadStyles.uploadBtn, errors[directorErrorKey(director.id, 'aadhaarFrontFileUri')] && uploadStyles.uploadBtnError, director.aadhaarFrontFileUri ? uploadStyles.uploadBtnSuccess : null]} onPress={() => openUploadModal({ directorId: director.id, field: 'aadhaarFrontFileUri', title: 'Upload Aadhaar (Front)' })}>
                   <Ionicons name={director.aadhaarFrontFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.aadhaarFrontFileUri ? '#fff' : Colors.primary} />
-                  <Text style={[uploadStyles.uploadBtnText, director.aadhaarFrontFileUri && uploadStyles.uploadBtnTextSuccess]}>
-                    {director.aadhaarFrontFileUri ? 'Aadhaar (Front) uploaded ✓' : 'Upload Aadhaar Front (JPEG / PDF)'}
-                  </Text>
+                  <Text style={[uploadStyles.uploadBtnText, director.aadhaarFrontFileUri ? uploadStyles.uploadBtnTextSuccess : null]}>{director.aadhaarFrontFileUri ? 'Aadhaar (Front) uploaded ✓' : 'Upload Aadhaar Front (JPEG / PDF)'}</Text>
                 </Pressable>
 
-                {/* Aadhaar Back upload */}
-                <Pressable
-                  style={[
-                    uploadStyles.uploadBtn,
-                    errors[directorErrorKey(director.id, 'aadhaarBackFileUri')] && uploadStyles.uploadBtnError,
-                    director.aadhaarBackFileUri && uploadStyles.uploadBtnSuccess,
-                    { marginTop: sh(8) },
-                  ]}
-                  onPress={() => openUploadModal({ directorId: director.id, field: 'aadhaarBackFileUri', title: 'Upload Aadhaar (Back)' })}>
+                <Pressable style={[uploadStyles.uploadBtn, errors[directorErrorKey(director.id, 'aadhaarBackFileUri')] && uploadStyles.uploadBtnError, director.aadhaarBackFileUri ? uploadStyles.uploadBtnSuccess : null, { marginTop: sh(8) }]} onPress={() => openUploadModal({ directorId: director.id, field: 'aadhaarBackFileUri', title: 'Upload Aadhaar (Back)' })}>
                   <Ionicons name={director.aadhaarBackFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.aadhaarBackFileUri ? '#fff' : Colors.primary} />
-                  <Text style={[uploadStyles.uploadBtnText, director.aadhaarBackFileUri && uploadStyles.uploadBtnTextSuccess]}>
-                    {director.aadhaarBackFileUri ? 'Aadhaar (Back) uploaded ✓' : 'Upload Aadhaar Back (JPEG / PDF)'}
-                  </Text>
+                  <Text style={[uploadStyles.uploadBtnText, director.aadhaarBackFileUri ? uploadStyles.uploadBtnTextSuccess : null]}>{director.aadhaarBackFileUri ? 'Aadhaar (Back) uploaded ✓' : 'Upload Aadhaar Back (JPEG / PDF)'}</Text>
                 </Pressable>
 
                 {(director.aadhaarFrontFileUri || director.aadhaarBackFileUri) && (
@@ -748,40 +724,26 @@ export default function CompanyRegistrationFormScreen() {
                 )}
 
                 <Text style={companyRegistrationFormStyles.label}>Shareholding %</Text>
-                <TextInput
-                  style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'shareholding')] && companyRegistrationFormStyles.inputError]}
-                  value={director.shareholding}
-                  onChangeText={(v) => updateDirector(director.id, 'shareholding', v)}
-                  placeholder="e.g. 50" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'shareholding')] && companyRegistrationFormStyles.inputError]} value={director.shareholding} onChangeText={(v) => updateDirector(director.id, 'shareholding', v)} placeholder="e.g. 50" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
               </View>
             ))}
           </View>
 
-          {/* Disclaimer */}
           <View style={companyRegistrationFormStyles.disclaimerBlock}>
             <Text style={companyRegistrationFormStyles.disclaimerText}>
               By submitting this form, you confirm that all information and documents provided (including company details, director details, PAN & Aadhaar) are correct, accurate and genuine. Finovert reserves the right to verify the submitted documents. Finovert does not take any risk for false or fraudulent documents submitted by the applicant.
             </Text>
-            <Pressable
-              style={[companyRegistrationFormStyles.checkboxRow, errors.disclaimer && companyRegistrationFormStyles.checkboxRowError]}
-              onPress={() => { setConfirmedDisclaimer((v) => !v); clearError('disclaimer'); }}>
-              <Ionicons
-                name={confirmedDisclaimer ? 'checkbox' : 'checkbox-outline'}
-                size={24}
-                color={confirmedDisclaimer ? Colors.primary : errors.disclaimer ? '#ef4444' : Colors.textMuted} />
-              <Text style={companyRegistrationFormStyles.checkboxLabel}>
-                I confirm that all documents and information are correct and verified
-              </Text>
+            <Pressable style={[companyRegistrationFormStyles.checkboxRow, errors.disclaimer && companyRegistrationFormStyles.checkboxRowError]} onPress={() => { setConfirmedDisclaimer((v) => !v); clearError('disclaimer'); }}>
+              <Ionicons name={confirmedDisclaimer ? 'checkbox' : 'checkbox-outline'} size={24} color={confirmedDisclaimer ? Colors.primary : errors.disclaimer ? '#ef4444' : Colors.textMuted} />
+              <Text style={companyRegistrationFormStyles.checkboxLabel}>I confirm that all documents and information are correct and verified</Text>
             </Pressable>
           </View>
 
           <Pressable
-            style={[
-              companyRegistrationFormStyles.ctaButton,
-              (!caseId || !confirmedDisclaimer || isSubmitting || alreadySubmitted) && companyRegistrationFormStyles.ctaButtonDisabled,
-            ]}
+            style={[companyRegistrationFormStyles.ctaButton, (!caseId || !confirmedDisclaimer || isSubmitting || alreadySubmitted) && companyRegistrationFormStyles.ctaButtonDisabled]}
             onPress={handleSubmit}
-            disabled={!caseId || !confirmedDisclaimer || isSubmitting || alreadySubmitted}>
+            disabled={!caseId || !confirmedDisclaimer || isSubmitting || alreadySubmitted}
+          >
             <Text style={companyRegistrationFormStyles.ctaButtonText}>
               {alreadySubmitted ? 'ALREADY SUBMITTED' : caseId ? 'SUBMIT TO DASHBOARD' : 'SUBMIT'}
             </Text>
@@ -792,123 +754,24 @@ export default function CompanyRegistrationFormScreen() {
   );
 }
 
-// ─── Upload modal styles (self-contained, no external dependency) ─────────────
-
 const uploadStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
-    paddingTop: 12,
-  },
-  handle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#e5e7eb',
-    alignSelf: 'center',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 13,
-    color: '#6b7280',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    marginBottom: 10,
-    backgroundColor: '#f9fafb',
-  },
-  optionPressed: {
-    backgroundColor: '#f3f4f6',
-  },
-  iconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#eff6ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, paddingTop: 12 },
+  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#e5e7eb', alignSelf: 'center', marginBottom: 16 },
+  title: { fontSize: 17, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 4 },
+  subtitle: { fontSize: 13, color: '#6b7280', textAlign: 'center', marginBottom: 20 },
+  option: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 12, borderRadius: 12, marginBottom: 10, backgroundColor: '#f9fafb' },
+  optionPressed: { backgroundColor: '#f3f4f6' },
+  iconWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center', marginRight: 14 },
   optionText: { flex: 1 },
-  optionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
-    marginBottom: 2,
-  },
-  optionDesc: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  cancelBtn: {
-    marginTop: 6,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: 12,
-    backgroundColor: '#f3f4f6',
-  },
-  cancelText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#6b7280',
-  },
-  // Upload button inside director card
-  uploadBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderWidth: 1.5,
-    borderColor: '#3b82f6',
-    borderStyle: 'dashed',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    marginBottom: 6,
-    backgroundColor: '#eff6ff',
-  },
-  uploadBtnError: {
-    borderColor: '#ef4444',
-    backgroundColor: '#fef2f2',
-  },
-  uploadBtnSuccess: {
-    borderStyle: 'solid',
-    borderColor: '#22c55e',
-    backgroundColor: '#22c55e',
-  },
-  uploadBtnText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#3b82f6',
-  },
-  uploadBtnTextSuccess: {
-    color: '#fff',
-  },
-  savedTag: {
-    fontSize: 12,
-    color: '#22c55e',
-    marginTop: 2,
-    marginBottom: 8,
-    marginLeft: 4,
-  },
+  optionTitle: { fontSize: 15, fontWeight: '600', color: '#111827', marginBottom: 2 },
+  optionDesc: { fontSize: 12, color: '#6b7280' },
+  cancelBtn: { marginTop: 6, paddingVertical: 14, alignItems: 'center', borderRadius: 12, backgroundColor: '#f3f4f6' },
+  cancelText: { fontSize: 15, fontWeight: '600', color: '#6b7280' },
+  uploadBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderColor: '#3b82f6', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 6, backgroundColor: '#eff6ff' },
+  uploadBtnError: { borderColor: '#ef4444', backgroundColor: '#fef2f2' },
+  uploadBtnSuccess: { borderStyle: 'solid', borderColor: '#22c55e', backgroundColor: '#22c55e' },
+  uploadBtnText: { fontSize: 14, fontWeight: '500', color: '#3b82f6' },
+  uploadBtnTextSuccess: { color: '#fff' },
+  savedTag: { fontSize: 12, color: '#22c55e', marginTop: 2, marginBottom: 8, marginLeft: 4 },
 });

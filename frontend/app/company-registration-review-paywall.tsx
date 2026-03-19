@@ -344,7 +344,7 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         animationType="slide"
         onRequestClose={() => setEditModalVisible(false)}>
         <Pressable style={editStyles.overlay} onPress={() => setEditModalVisible(false)}>
-          <Pressable style={editStyles.sheet} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={editStyles.sheet} onPress={() => {}}>
             <View style={editStyles.handle} />
             <Text style={editStyles.title}>Edit {editField?.label}</Text>
             <TextInput
