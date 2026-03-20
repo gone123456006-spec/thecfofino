@@ -25,10 +25,11 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.brandovert.finovert",
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -65,7 +66,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "a26a48e3-4bb8-42a0-b38f-cb24bf2198c9"
+        "projectId": "c70e7d82-3e5b-428b-8ad7-75bf4fd1d064"
       }
     },
     "owner": "shyamhero",
