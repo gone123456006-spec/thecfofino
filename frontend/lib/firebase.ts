@@ -56,10 +56,34 @@ export async function signInWithEmail(email: string, password: string): Promise<
 /** Sign in to Firebase with Google id token (e.g. from expo-auth-session). */
 export async function signInWithGoogleIdToken(idToken: string): Promise<UserCredential> {
   if (!auth) throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to .env');
-  const credential = GoogleAuthProvider.credential(idToken);
-  return signInWithCredential(auth, credential);
+  
+  try {
+    const credential = GoogleAuthProvider.credential(idToken);
+    return signInWithCredential(auth, credential);
+  } catch (error: any) {
+    console.error('Firebase Google Sign-In Error:', error.code, error.message);
+    throw new Error(
+      error.code === 'auth/invalid-credential'
+        ? 'Invalid Google ID token. Please try again.'
+        : error.message || 'Failed to sign in with Google'
+    );
+  }
 }
 
 export async function getIdToken(user: User): Promise<string> {
   return user.getIdToken();
 }
+
+export async function getUserEmail(user: User): Promise<string | null> {
+  return user.email || null;
+}
+
+export async function getUserName(user: User): Promise<string | null> {
+  return user.displayName || null;
+}
+
+export function signOutFirebase(): Promise<void> {
+  if (!auth) throw new Error('Firebase is not configured');
+  return auth.signOut();
+}
+

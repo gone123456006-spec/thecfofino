@@ -1,5 +1,5 @@
 {
-  "name": "finoverts",
+  "name": "finovert",
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
@@ -33,6 +33,7 @@
     "expo-image-picker": "~17.0.10",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.11",
+    "expo-random": "^14.0.1",
     "expo-router": "~6.0.23",
     "expo-sharing": "^55.0.11",
     "expo-splash-screen": "~31.0.13",
@@ -41,7 +42,7 @@
     "expo-updates": "~29.0.16",
     "expo-video": "^55.0.10",
     "expo-web-browser": "~15.0.0",
-    "firebase": "^10.12.2",
+    "firebase": "^10.14.1",
     "fs-extra": "^11.3.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",

@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 
 const authRoutes = require('./routes/auth');
+const userAuthRoutes = require('./routes/user-auth');
 const registrationRoutes = require('./routes/registrations');
 const bookingRoutes = require('./routes/bookings');
 const paymentRoutes = require('./routes/payments');
@@ -46,6 +47,7 @@ app.get('/api/health', (_req, res) => {
 
 // ─── Routes ───────────────────────────────────────────────────────
 app.use('/api/admin', authRoutes);
+app.use('/api/auth', userAuthRoutes);
 app.use('/api/registrations', registrationRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/payments', paymentRoutes);
@@ -74,13 +76,21 @@ mongoose
     .connect(config.mongoUri)
     .then(async () => {
         console.log('✅ Connected to MongoDB Atlas');
-        // Fix E11000 on email: drop old non-sparse unique index so sparse index can be used
+        // Fix E11000 on email and mobile: drop old non-sparse unique indexes so sparse indexes can be used
         try {
             await User.collection.dropIndex('email_1');
             console.log('✅ Dropped old email_1 index');
         } catch (e) {
             if (e.code !== 27 && e.codeName !== 'IndexNotFound') {
                 console.warn('Index email_1 drop (optional):', e.message);
+            }
+        }
+        try {
+            await User.collection.dropIndex('mobile_1');
+            console.log('✅ Dropped old mobile_1 index');
+        } catch (e) {
+            if (e.code !== 27 && e.codeName !== 'IndexNotFound') {
+                console.warn('Index mobile_1 drop (optional):', e.message);
             }
         }
         await User.syncIndexes();

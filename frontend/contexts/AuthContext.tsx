@@ -4,9 +4,9 @@ import { Platform } from 'react-native';
 
 import { clearCompanyRegistrationState } from '@/utils/company-registration-draft';
 
-const AUTH_KEY = '@finoverts_auth';
-const TOKEN_KEY = '@finoverts_token';
-const WELCOME_KEY = '@finoverts_welcome_seen';
+const AUTH_KEY = '@finovert_auth';
+const TOKEN_KEY = '@finovert_token';
+const WELCOME_KEY = '@finovert_welcome_seen';
 
 /** Backend API base. Set EXPO_PUBLIC_API_URL in .env for physical device (e.g. http://192.168.1.5:4000/api). */
 function getApiBase(): string {
@@ -25,19 +25,15 @@ type AuthContextValue = {
   isReady: boolean;
   hasSeenWelcome: boolean;
   setHasSeenWelcome: () => Promise<void>;
-  /** Login or sign up with demo mode. */
-  loginWithMobile: (name: string, mobile: string) => Promise<void>;
-  /** Send OTP via OTP.dev. */
-  sendOtpWithDev: (mobile: string) => Promise<string>;
-  /** Verify OTP via OTP.dev. */
-  verifyWithDev: (name: string, mobile: string, code: string) => Promise<void>;
-  /** Sign in with Google (idToken). */
+  /** Sign in with Google using Firebase. */
   loginWithGoogle: (idToken: string) => Promise<void>;
-  /** Exchange Firebase ID token for app session. Use after Firebase sign-in (email or Google). */
-  loginWithFirebase: (idToken: string) => Promise<void>;
+  /** Sign in with email and password. */
+  loginWithEmail: (email: string, password: string, name?: string, mobile?: string) => Promise<void>;
   logout: () => Promise<void>;
-  /** Get current session token for API calls (e.g. linking registration to user). */
+  /** Get current session token for API calls. */
   getToken: () => Promise<string | null>;
+  /** Update user profile (name, mobile, email). */
+  updateProfile: (updates: Partial<User>) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -130,14 +126,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const digits = mobile.replace(/\D/g, '').slice(-10);
       if (digits.length !== 10) throw new Error('Enter a valid 10-digit mobile number.');
       let res: Response;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
       try {
         res = await fetch(`${getApiBase()}/otp/send-otp-dev`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mobile: `91${digits}` }),
+          body: JSON.stringify({ mobile: digits }),
+          signal: controller.signal,
         });
-      } catch (e) {
+      } catch (e: any) {
+        if (e.name === 'AbortError') throw new Error('OTP request timed out. Please try again.');
         handleNetworkError(e);
+      } finally {
+        clearTimeout(timeoutId);
       }
       const json = await (res!).json().catch(() => ({}));
       if (!res!.ok || !json.ok) {
@@ -153,14 +156,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const digits = mobile.replace(/\D/g, '').slice(-10);
       if (digits.length !== 10) throw new Error('Enter a valid 10-digit mobile number.');
       let res: Response;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
       try {
         res = await fetch(`${getApiBase()}/otp/verify-otp-dev`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name.trim() || 'User', mobile: `91${digits}`, code }),
+          body: JSON.stringify({ name: name.trim() || 'User', mobile: digits, code }),
+          signal: controller.signal,
         });
-      } catch (e) {
+      } catch (e: any) {
+        if (e.name === 'AbortError') throw new Error('Verification request timed out. Please try again.');
         handleNetworkError(e);
+      } finally {
+        clearTimeout(timeoutId);
       }
       const json = await (res!).json().catch(() => ({}));
       if (!res!.ok || !json.ok || !json.token) throw new Error(json.error || 'Invalid OTP.');
@@ -199,6 +209,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: json.user?.name ?? '',
         mobile: json.user?.mobile ?? '',
         email: json.user?.email ?? '',
+      };
+      await persistUser(u, json.token);
+    },
+    [persistUser, handleNetworkError],
+  );
+
+  const loginWithEmail = useCallback(
+    async (email: string, password: string, name?: string, mobile?: string) => {
+      let res: Response;
+      try {
+        res = await fetch(`${getApiBase()}/auth/email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.toLowerCase().trim(), password, name, mobile }),
+        });
+      } catch (e) {
+        return handleNetworkError(e);
+      }
+
+      const text = await res!.text();
+      let json: { ok?: boolean; error?: string; token?: string; user?: { name?: string; mobile?: string; email?: string } };
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(res!.status >= 500 ? 'Server error. Try again later.' : 'Invalid response.');
+      }
+
+      if (!res!.ok) throw new Error(json.error || 'Sign-in with email failed.');
+      if (!json.ok || !json.token) throw new Error(json.error || 'Sign-in with email failed.');
+
+      const u: User = {
+        name: json.user?.name || name || '',
+        mobile: json.user?.mobile || mobile || '',
+        email: json.user?.email || email,
       };
       await persistUser(u, json.token);
     },
@@ -251,18 +295,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return AsyncStorage.getItem(TOKEN_KEY);
   }, []);
 
+  const updateProfile = useCallback(
+    async (updates: Partial<User>) => {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated.');
+
+      let res: Response;
+      try {
+        res = await fetch(`${getApiBase()}/users/profile`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(updates),
+        });
+      } catch (e) {
+        handleNetworkError(e);
+      }
+
+      const json = await (res!).json().catch(() => ({}));
+      if (!res!.ok) throw new Error(json.error || 'Update failed.');
+
+      if (json.ok && json.user) {
+        const updatedUser: User = {
+          ...user!,
+          ...json.user,
+        };
+        setUser(updatedUser);
+        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updatedUser));
+      }
+    },
+    [user, getToken, handleNetworkError],
+  );
+
   const value: AuthContextValue = {
     user,
     isReady,
     hasSeenWelcome,
     setHasSeenWelcome,
-    loginWithMobile,
-    sendOtpWithDev,
-    verifyWithDev,
     loginWithGoogle,
-    loginWithFirebase,
+    loginWithEmail,
     logout,
     getToken,
+    updateProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

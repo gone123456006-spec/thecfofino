@@ -1,0 +1,12 @@
+{
+  "data": [],
+  "pagination": {
+    "number": 1,
+    "size": 10,
+    "total": 0,
+    "links": {
+      "first": "https://api.otp.dev/v1/verifications?page_size=10",
+      "current": "https://api.otp.dev/v1/verifications?page_size=10"
+    }
+  }
+}

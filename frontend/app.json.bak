@@ -1,16 +1,16 @@
 {
   "expo": {
-    "name": "finoverts",
-    "slug": "finoverts",
+    "name": "finovert",
+    "slug": "finovert",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "finoverts",
+    "scheme": "finovert",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.brandovert.finoverts",
+      "bundleIdentifier": "com.brandovert.finovert",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -24,7 +24,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.brandovert.finoverts"
+      "package": "com.brandovert.finovert"
     },
     "web": {
       "output": "static",

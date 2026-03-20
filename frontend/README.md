@@ -73,7 +73,7 @@ If **"emulator is not recognized"** when you run `emulator -list-avds` or `emula
 
 ## ADB exited with code 255 (emulator-5554 / pm list packages)
 
-If you see **"adb ... shell pm list packages ... com.brandovert.finoverts exited with non-zero code: 255"**:
+If you see **"adb ... shell pm list packages ... com.brandovert.finovert exited with non-zero code: 255"**:
 
 1. **Wrong ADB path** – The error often uses `C:\Users\USER\.android\platform-tools\adb`, which is not the real Android SDK. Expo/Android need the **official SDK** `platform-tools`.
 

@@ -18,12 +18,20 @@ router.patch('/profile', async (req, res) => {
 
     try {
         const decoded = jwt.verify(token, config.jwt.secret);
-        const { name, email } = req.body;
+        const { name, mobile: rawMobile, email } = req.body;
         const update = {};
-        if (name !== undefined) update.name = name;
-        if (email !== undefined) update.email = email;
+        if (name !== undefined) update.name = name ? String(name).trim() : 'User';
+        if (email !== undefined) update.email = email ? String(email).toLowerCase().trim() : undefined;
+        
+        if (rawMobile !== undefined) {
+            const digits = String(rawMobile).replace(/\D/g, '').slice(-10);
+            if (digits && digits.length !== 10) {
+                return res.status(400).json({ ok: false, error: 'Mobile number must be a valid 10-digit number.' });
+            }
+            update.mobile = digits || undefined;
+        }
 
-        const user = await User.findByIdAndUpdate(decoded.userId, { $set: update }, { new: true });
+        const user = await User.findByIdAndUpdate(decoded.userId, { $set: update }, { new: true, runValidators: true });
         if (!user) return res.status(404).json({ ok: false, error: 'User not found.' });
 
         return res.json({
@@ -31,7 +39,11 @@ router.patch('/profile', async (req, res) => {
             user: { id: user._id, name: user.name, mobile: user.mobile, email: user.email },
         });
     } catch (err) {
-        return res.status(401).json({ ok: false, error: 'Invalid token.' });
+        if (err.code === 11000) {
+            return res.status(409).json({ ok: false, error: 'This mobile number is already linked to another account.' });
+        }
+        console.error('[patch/profile] error:', err);
+        return res.status(401).json({ ok: false, error: 'Invalid token or update failed.' });
     }
 });
 

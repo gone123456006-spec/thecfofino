@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
-const STORAGE_KEY = '@finoverts_notifications';
+const STORAGE_KEY = '@finovert_notifications';
 
 export type NotificationItem = {
   id: string;

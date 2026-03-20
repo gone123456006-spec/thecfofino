@@ -1,13 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as SplashScreenNative from 'expo-splash-screen';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, Pressable, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
+import React, { useState, useEffect } from 'react';
 
 import { LoginScreen } from '@/components/LoginScreen';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
+import { SplashScreen } from '@/components/SplashScreen';
+import { TaglineScreen } from '@/components/TaglineScreen';
 import { Colors } from '@/constants/theme';
 import { ms, sw } from '@/utils/responsive';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -34,12 +38,43 @@ export const unstable_settings = {
 function RootLayoutContent() {
   const colorScheme = useColorScheme();
   const { user, isReady, hasSeenWelcome } = useAuth();
+  const [showSplash, setShowSplash] = useState(true);
+  const [showTagline, setShowTagline] = useState(false);
 
-  if (!isReady) {
+  useEffect(() => {
+    // Hide the native splash screen as soon as this component mounts
+    SplashScreenNative.hideAsync().catch(() => {});
+
+    if (isReady && showSplash) {
+      // Small delay for the initial logo animation to breathe
+      const timer = setTimeout(() => {
+        setShowSplash(false);
+        setShowTagline(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isReady, showSplash]);
+
+  if (showSplash) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
+      <>
+        <SplashScreen onFinish={() => {
+          if (isReady) {
+            setShowSplash(false);
+            setShowTagline(true);
+          }
+        }} />
+        <StatusBar style="dark" />
+      </>
+    );
+  }
+
+  if (showTagline) {
+    return (
+      <>
+        <TaglineScreen onFinish={() => setShowTagline(false)} />
+        <StatusBar style="dark" />
+      </>
     );
   }
 

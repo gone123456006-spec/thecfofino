@@ -64,9 +64,9 @@ export const profileStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: sw(16),
-    paddingTop: sh(20),
-    paddingBottom: sh(16),
-    gap: sw(14),
+    paddingTop: sh(24),
+    paddingBottom: sh(20),
+    gap: sw(16),
   },
   avatar: {
     width: sw(72),
@@ -100,9 +100,10 @@ export const profileStyles = StyleSheet.create({
   },
   userInfo: {
     flex: 1,
+    justifyContent: 'center',
   },
   name: {
-    fontSize: ms(20),
+    fontSize: ms(22),
     fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: sh(2),
@@ -337,5 +338,75 @@ export const profileStyles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: 'center',
     marginTop: 0,
+  },
+  
+  // ─── Edit Modal ────────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: sw(20),
+  },
+  modalContent: {
+    backgroundColor: Colors.white,
+    borderRadius: sw(16),
+    padding: sw(24),
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: ms(20),
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: sh(20),
+  },
+  inputGroup: {
+    marginBottom: sh(16),
+  },
+  inputLabel: {
+    fontSize: ms(13),
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: sh(6),
+  },
+  input: {
+    height: sh(48),
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: sw(10),
+    paddingHorizontal: sw(14),
+    fontSize: ms(16),
+    color: Colors.textPrimary,
+    backgroundColor: Colors.surface,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: sw(12),
+    marginTop: sh(12),
+  },
+  modalActionBtn: {
+    paddingVertical: sh(10),
+    paddingHorizontal: sw(20),
+    borderRadius: sw(10),
+  },
+  cancelBtn: {
+    backgroundColor: Colors.surfaceLight,
+  },
+  saveBtn: {
+    backgroundColor: Colors.primary,
+  },
+  cancelBtnText: {
+    fontSize: ms(15),
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  saveBtnText: {
+    fontSize: ms(15),
+    fontWeight: '700',
+    color: Colors.white,
   },
 });

@@ -55,7 +55,7 @@ export type CompanyRegistrationProcessState = {
   updatedAt: string;
 };
 
-const STORAGE_KEY = '@finoverts_company_registration_state';
+const STORAGE_KEY = '@finovert_company_registration_state';
 const defaultUploadMap: Record<string, boolean> = {
   pan: false,
   aadhaar: false,

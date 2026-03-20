@@ -29,26 +29,13 @@ async function testOtp() {
         const sendJson = await sendRes.json();
         fs.writeFileSync('otp_response.json', JSON.stringify(sendJson, null, 2));
 
-        if (sendJson.data && sendJson.data.id) {
-            const verifyId = sendJson.data.id;
-            const verifyRes = await fetch(`https://api.otp.dev/v1/verifications/${verifyId}/check`, {
-                method: "POST",
-                headers: {
-                    'X-OTP-Key': API_KEY,
-                    'accept': 'application/json',
-                    'content-type': 'application/json'
-                },
-                body: JSON.stringify({ data: { code: "1234" } })
-            });
-            const verifyJson = await verifyRes.json();
-            fs.writeFileSync('otp_verify_response.json', JSON.stringify(verifyJson, null, 2));
-
-            const verifyResGet = await fetch(`https://api.otp.dev/v1/verifications/${verifyId}`, {
+        if (sendJson.data && sendJson.data.message_id) {
+            const verifyId = sendJson.data.message_id;
+            const verifyResGet = await fetch(`https://api.otp.dev/v1/verifications?code=1234&phone=${PHONE}`, {
                 method: "GET",
                 headers: {
                     'X-OTP-Key': API_KEY,
-                    'accept': 'application/json',
-                    'content-type': 'application/json'
+                    'accept': 'application/json'
                 }
             });
             const verifyJsonGet = await verifyResGet.json();
