@@ -25,11 +25,10 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.brandovert.finovert",
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.RECORD_AUDIO"
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO"
       ]
     },
     "web": {
@@ -55,7 +54,8 @@
           "photosPermission": "Allow access to gallery to upload document photos.",
           "cameraPermission": "Allow access to camera to take photos of documents."
         }
-      ]
+      ],
+      "expo-video"
     ],
     "assetBundlePatterns": [
       "**/*"
