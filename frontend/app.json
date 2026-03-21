@@ -4,7 +4,12 @@
     "slug": "finovert",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/New Logo App.png",
+    "icon": "./assets/images/new-logo-app.png",
+    "splash": {
+      "image": "./assets/images/new-logo-app.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#e3f2fd"
+    },
     "scheme": "finovert",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -19,7 +24,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/New Logo App.png"
+        "foregroundImage": "./assets/images/new-logo-app.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -33,7 +38,7 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/New Logo App.png"
+      "favicon": "./assets/images/new-logo-app.png"
     },
     "plugins": [
       "expo-router",
