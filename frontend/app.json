@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "finovert",
+    "name": "Finovert",
     "slug": "finovert",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -45,8 +45,12 @@
       [
         "expo-splash-screen",
         {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
           "backgroundColor": "#e3f2fd",
           "dark": {
+            "image": "./assets/images/splash-icon.png",
             "backgroundColor": "#000000"
           }
         }
@@ -60,7 +64,8 @@
           "cameraPermission": "Allow access to camera to take photos of documents."
         }
       ],
-      "expo-video"
+      "expo-video",
+      "@react-native-google-signin/google-signin"
     ],
     "assetBundlePatterns": [
       "**/*"

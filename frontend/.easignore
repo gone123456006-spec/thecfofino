@@ -2,3 +2,8 @@
 dist/
 .expo/
 *.mp4.bak
+
+# Gradle caches and outputs (prevents EBUSY lock errors on Windows during EAS build)
+android/.gradle/
+android/app/build/
+android/build/

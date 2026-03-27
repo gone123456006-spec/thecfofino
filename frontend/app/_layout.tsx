@@ -9,6 +9,7 @@ import 'react-native-reanimated';
 import React, { useState, useEffect } from 'react';
 
 import { LoginScreen } from '@/components/LoginScreen';
+import { CreateProfileScreen } from '@/components/CreateProfileScreen';
 import { WelcomeScreen } from '@/components/WelcomeScreen';
 import { SplashScreen } from '@/components/SplashScreen';
 import { TaglineScreen } from '@/components/TaglineScreen';
@@ -91,6 +92,17 @@ function RootLayoutContent() {
     return (
       <>
         <LoginScreen />
+        <StatusBar style="dark" />
+      </>
+    );
+  }
+
+  // Logged in but profile not yet complete (no name or phone)
+  const needsProfile = !user.name || !user.mobile;
+  if (needsProfile) {
+    return (
+      <>
+        <CreateProfileScreen />
         <StatusBar style="dark" />
       </>
     );

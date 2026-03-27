@@ -317,14 +317,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const json = await (res!).json().catch(() => ({}));
       if (!res!.ok) throw new Error(json.error || 'Update failed.');
 
-      if (json.ok && json.user) {
-        const updatedUser: User = {
-          ...user!,
-          ...json.user,
-        };
-        setUser(updatedUser);
-        await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updatedUser));
-      }
+      // Always merge updates into local state so UI gates (needsProfile) clear immediately
+      const updatedUser: User = {
+        ...user!,
+        ...(json.ok && json.user ? json.user : updates),
+      };
+      setUser(updatedUser);
+      await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updatedUser));
     },
     [user, getToken, handleNetworkError],
   );

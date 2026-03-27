@@ -57,12 +57,16 @@ Complete step-by-step setup to enable Google Sign-In in the Finovert Expo app.
 3. Choose **"Web application"**
 4. Name it "Finovert Web Client"
 5. Under **Authorized JavaScript origins**, add:
-   - `http://localhost:3000`
+   - `https://finovert.com` (if applicable)
    - `http://localhost:8081`
-   - `http://localhost:19006`
    - `http://127.0.0.1`
-6. **Copy the `Client ID`** (you'll use this in `.env`)
-7. Click **"Create"**
+6. Under **Authorized redirect URIs**, add the following EXACT URIs:
+   - `https://auth.expo.io/@shyamhero/finovert` (Required for Expo Go)
+   - `http://localhost:8081/` (Required for local Web development)
+   - `https://finovert.com/` (For production Web deployed app)
+   *(Note: The trailing slash for the Web redirect URLs is often important!)*
+7. **Copy the `Client ID`** (you'll use this in `.env`)
+8. Click **"Create"**
 
 ### Step 6: Get expoClientId for Expo Auth Session
 1. In Google Cloud Console, go to **APIs & Services** → **Credentials**
