@@ -1,35 +1,104 @@
 const express = require('express');
+const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const User = require('../models/User');
 
 const router = express.Router();
+const SALT_ROUNDS = 10;
+
+function decodeJwtPayload(token) {
+    if (!token || typeof token !== 'string') return null;
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+}
+
+function normalizeEmail(email) {
+    return String(email).toLowerCase().trim();
+}
+
+/** UI labels this as Gmail; enforce Gmail (or googlemail) domains for email/password auth. */
+function isGmailAddress(email) {
+    const n = normalizeEmail(email);
+    return /\.(gmail|googlemail)\.com$/i.test(n);
+}
+
+function normalizeMobileDigits(mobile) {
+    const digits = String(mobile || '').replace(/\D/g, '').slice(-10);
+    return digits.length === 10 ? digits : null;
+}
+
+function getJwtSecret(res) {
+    const jwtSecret = config.jwt && config.jwt.secret;
+    if (!jwtSecret) {
+        console.error('[auth] JWT_SECRET is not set');
+        res.status(500).json({ ok: false, error: 'Server configuration error.' });
+        return null;
+    }
+    return jwtSecret;
+}
+
+function signAppToken(user) {
+    const jwtSecret = config.jwt && config.jwt.secret;
+    return jwt.sign(
+        { userId: user._id, email: user.email || '', name: user.name || '' },
+        jwtSecret,
+        { expiresIn: config.jwt.expiresIn || '7d' },
+    );
+}
+
+function userJson(user) {
+    return {
+        id: user._id,
+        name: user.name || '',
+        email: user.email || '',
+        mobile: user.mobile || '',
+        isVerified: user.isVerified,
+    };
+}
+
+async function verifyPassword(user, plain) {
+    if (!user.password || !plain) return false;
+    if (user.password.startsWith('$2')) {
+        return bcrypt.compare(plain, user.password);
+    }
+    if (user.password === plain) {
+        user.password = await bcrypt.hash(plain, SALT_ROUNDS);
+        await user.save();
+        return true;
+    }
+    return false;
+}
 
 /**
- * POST /api/auth/email
- * Sign in or sign up with email and password.
- * Body: { email, password }
- * Returns: { ok: true, token, user: { name, email, mobile, id } }
+ * POST /api/auth/signup
+ * Register with name, mobile, Gmail, password (after Firebase user is created on the client).
+ * Body: { name, mobile, email, password, firebaseUid? }
  */
-router.post('/email', async (req, res) => {
+router.post('/signup', async (req, res) => {
     try {
-        const { email, password, name, mobile } = req.body || {};
+        const { name, mobile, email, password, firebaseUid } = req.body || {};
 
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ ok: false, error: 'Name is required.' });
+        }
         if (!email || !password) {
+            return res.status(400).json({ ok: false, error: 'Email and password are required.' });
+        }
+        const mobileDigits = normalizeMobileDigits(mobile);
+        if (!mobileDigits) {
+            return res.status(400).json({ ok: false, error: 'Enter a valid 10-digit mobile number.' });
+        }
+        if (!isGmailAddress(email)) {
             return res.status(400).json({
                 ok: false,
-                error: 'Email and password are required.',
+                error: 'Use a Gmail address (@gmail.com) for email sign-up.',
             });
         }
-
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({
-                ok: false,
-                error: 'Invalid email address.',
-            });
-        }
-
+        const normEmail = normalizeEmail(email);
         if (password.length < 6) {
             return res.status(400).json({
                 ok: false,
@@ -37,76 +106,107 @@ router.post('/email', async (req, res) => {
             });
         }
 
-        console.log('[auth/email] Attempting login:', email);
+        const existing = await User.findOne({ email: normEmail });
+        if (existing) {
+            return res.status(409).json({ ok: false, error: 'This email is already registered.' });
+        }
 
-        // Check if user exists
-        let user = await User.findOne({ email: email.toLowerCase().trim() });
+        const hash = await bcrypt.hash(password, SALT_ROUNDS);
+        const user = await User.create({
+            name: String(name).trim(),
+            mobile: mobileDigits,
+            email: normEmail,
+            password: hash,
+            firebaseUid: firebaseUid && String(firebaseUid).trim() ? String(firebaseUid).trim() : undefined,
+            isVerified: true,
+            lastLoginAt: new Date(),
+        });
+
+        const jwtSecret = getJwtSecret(res);
+        if (!jwtSecret) return;
+
+        const token = signAppToken(user);
+        return res.status(201).json({
+            ok: true,
+            token,
+            user: userJson(user),
+        });
+    } catch (err) {
+        console.error('[auth/signup] error:', err);
+        if (err.code === 11000) {
+            return res.status(409).json({
+                ok: false,
+                error: 'Email or mobile is already registered.',
+            });
+        }
+        return res.status(500).json({
+            ok: false,
+            error: 'Sign-up failed. Please try again.',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/email
+ * Login only (existing accounts). Does not create users.
+ * Body: { email, password }
+ */
+router.post('/email', async (req, res) => {
+    try {
+        const { email, password } = req.body || {};
+
+        if (!email || !password) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Email and password are required.',
+            });
+        }
+        if (!isGmailAddress(email)) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Use a Gmail address (@gmail.com) to sign in.',
+            });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Password must be at least 6 characters.',
+            });
+        }
+
+        const normEmail = normalizeEmail(email);
+        const user = await User.findOne({ email: normEmail });
 
         if (!user) {
-            console.log('[auth/email] User not found, creating new account');
-            // Create new user (sign up)
-            user = await User.create({
-                email: email.toLowerCase().trim(),
-                password: password, // Note: In production, hash this with bcrypt
-                name: name || email.split('@')[0],
-                mobile: mobile || '',
-                isVerified: true,
-                lastLoginAt: new Date(),
-            });
-            console.log('[auth/email] New user created:', user._id);
-        } else {
-            console.log('[auth/email] User found, checking password');
-            console.log('[auth/email] Stored password:', user.password ? `[${user.password.length} chars]` : 'undefined');
-            console.log('[auth/email] Provided password:', password ? `[${password.length} chars]` : 'undefined');
-            // For now, do simple password check (in production, use bcrypt)
-            if (user.password !== password) {
-                console.log('[auth/email] Password mismatch - stored:', JSON.stringify(user.password), 'provided:', JSON.stringify(password));
-                return res.status(401).json({
-                    ok: false,
-                    error: 'Invalid email or password.',
-                });
-            }
-            user.lastLoginAt = new Date();
-            await user.save();
-        }
-
-        // Generate JWT token
-        const jwtSecret = config.jwt && config.jwt.secret;
-        if (!jwtSecret) {
-            console.error('[auth/email] JWT_SECRET is not set');
-            return res.status(500).json({
+            return res.status(401).json({
                 ok: false,
-                error: 'Server configuration error.',
+                error: 'No account for this email. Sign up first.',
             });
         }
 
-        const token = jwt.sign(
-            { userId: user._id, email: user.email, name: user.name || '' },
-            jwtSecret,
-            { expiresIn: config.jwt.expiresIn || '7d' }
-        );
+        const ok = await verifyPassword(user, password);
+        if (!ok) {
+            return res.status(401).json({
+                ok: false,
+                error: 'Invalid email or password.',
+            });
+        }
 
-        console.log('[auth/email] ✅ Login successful for:', email);
+        const jwtSecret = getJwtSecret(res);
+        if (!jwtSecret) return;
+
+        user.lastLoginAt = new Date();
+        await user.save();
+
+        const token = signAppToken(user);
 
         return res.status(200).json({
             ok: true,
             token,
-            user: {
-                id: user._id,
-                name: user.name || '',
-                email: user.email || '',
-                mobile: user.mobile || '',
-                isVerified: user.isVerified,
-            },
+            user: userJson(user),
         });
     } catch (err) {
         console.error('[auth/email] error:', err);
-        if (err.code === 11000) {
-            return res.status(409).json({
-                ok: false,
-                error: 'Email already registered.',
-            });
-        }
         return res.status(500).json({
             ok: false,
             error: 'Email sign-in failed. Please try again.',
@@ -116,9 +216,8 @@ router.post('/email', async (req, res) => {
 
 /**
  * POST /api/auth/google
- * Sign in or sign up with Google.
+ * Exchange Firebase ID token for app JWT. User must already exist (sign up via /signup or other flows).
  * Body: { idToken }
- * Returns: { ok: true, token, user: { name, email, mobile, id } }
  */
 router.post('/google', async (req, res) => {
     try {
@@ -131,35 +230,25 @@ router.post('/google', async (req, res) => {
             });
         }
 
-        console.log('[auth/google] Processing Google login');
-
-        // In production, decode and verify idToken with Firebase
-        // For now, we'll assume the frontend verified it
-        // In real implementation: admin-sdk decode, extract email/name
-
-        // Mock implementation: extract basic info from JWT (in production, verify with Firebase)
-        let googleEmail = null;
-        let googleName = null;
-
+        let decoded;
         try {
-            // This is a simple decode (NOT verification - frontend should verify with Firebase)
-            // In production, use Firebase Admin SDK
-            const parts = idToken.split('.');
-            if (parts.length === 3) {
-                const decoded = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-                googleEmail = decoded.email;
-                googleName = decoded.name || decoded.given_name || 'User';
-                console.log('[auth/google] Decoded email:', googleEmail);
-            }
+            decoded = decodeJwtPayload(idToken);
         } catch (e) {
             console.warn('[auth/google] Could not decode token locally:', e.message);
-            // Continue anyway - frontend should have verified it
             return res.status(400).json({
                 ok: false,
                 error: 'Invalid ID token.',
             });
         }
 
+        if (!decoded) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Invalid ID token.',
+            });
+        }
+
+        const googleEmail = decoded.email;
         if (!googleEmail) {
             return res.status(400).json({
                 ok: false,
@@ -167,62 +256,36 @@ router.post('/google', async (req, res) => {
             });
         }
 
-        // Check if user exists
-        let user = await User.findOne({ email: googleEmail.toLowerCase().trim() });
+        const firebaseSub = decoded.sub || decoded.user_id || null;
+        const normEmail = normalizeEmail(googleEmail);
+        const user = await User.findOne({ email: normEmail });
 
         if (!user) {
-            console.log('[auth/google] User not found, creating new account');
-            // Create new user from Google info
-            user = await User.create({
-                email: googleEmail.toLowerCase().trim(),
-                name: googleName || googleEmail.split('@')[0],
-                isVerified: true,
-                lastLoginAt: new Date(),
-            });
-            console.log('[auth/google] New user created:', user._id);
-        } else {
-            console.log('[auth/google] User found, updating last login');
-            user.lastLoginAt = new Date();
-            await user.save();
-        }
-
-        // Generate JWT token
-        const jwtSecret = config.jwt && config.jwt.secret;
-        if (!jwtSecret) {
-            console.error('[auth/google] JWT_SECRET is not set');
-            return res.status(500).json({
+            return res.status(403).json({
                 ok: false,
-                error: 'Server configuration error.',
+                error:
+                    'No Finovert account for this email yet. Sign up with your Gmail, name, and mobile first.',
             });
         }
 
-        const token = jwt.sign(
-            { userId: user._id, email: user.email, name: user.name || '' },
-            jwtSecret,
-            { expiresIn: config.jwt.expiresIn || '7d' }
-        );
+        user.lastLoginAt = new Date();
+        if (firebaseSub && !user.firebaseUid) {
+            user.firebaseUid = firebaseSub;
+        }
+        await user.save();
 
-        console.log('[auth/google] ✅ Login successful for:', googleEmail);
+        const jwtSecret = getJwtSecret(res);
+        if (!jwtSecret) return;
+
+        const token = signAppToken(user);
 
         return res.status(200).json({
             ok: true,
             token,
-            user: {
-                id: user._id,
-                name: user.name || '',
-                email: user.email || '',
-                mobile: user.mobile || '',
-                isVerified: user.isVerified,
-            },
+            user: userJson(user),
         });
     } catch (err) {
         console.error('[auth/google] error:', err);
-        if (err.code === 11000) {
-            return res.status(409).json({
-                ok: false,
-                error: 'Email already registered.',
-            });
-        }
         return res.status(500).json({
             ok: false,
             error: 'Google sign-in failed. Please try again.',
