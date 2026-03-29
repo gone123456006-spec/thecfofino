@@ -165,7 +165,7 @@ export default function ProfileScreen() {
   const openTerms = () => router.push('/terms');
   const openPrivacy = () => router.push('/privacy');
   const openPolicies = () => Linking.openURL(POLICIES_URL).catch(() => { });
-  const openAbout = () => Linking.openURL(ABOUT_URL).catch(() => { });
+  const openAbout = () => router.push('/about');
   const openHelp = () => Linking.openURL(HELP_URL).catch(() => { });
   const openPlayStore = () => Linking.openURL(PLAY_STORE_URL).catch(() => { });
   const openContact = () => Linking.openURL(`mailto:${CONTACT_EMAIL}`).catch(() => { });
@@ -327,12 +327,11 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </Pressable>
 
-        <View style={styles.logoWrap}>
+        <View style={[styles.logoWrap, { alignItems: 'center', marginTop: 20, marginBottom: 40 }]}>
           <Image
-            source={LogoImage}
-            style={[styles.logoImage, { backgroundColor: 'transparent' }]}
+            source={require('@/assets/images/logogogw.png')}
+            style={{ width: 64, height: 64, marginBottom: -14 }}
             resizeMode="contain"
-            accessibilityLabel="Finovert"
           />
           <Text style={styles.version}>Version 1.0.0</Text>
         </View>

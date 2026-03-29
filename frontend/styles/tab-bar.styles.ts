@@ -1,17 +1,17 @@
 import { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 
 // Match home page gradient (teal #2ECCC7 → blue #0063E7)
-const homeBgBlue = '#0063E7';
+const homeBgSoftBlue = '#D9EFFF';
 
 export const tabBarOptions: BottomTabNavigationOptions = {
   headerShown: false,
-  tabBarActiveTintColor: '#ffffff',
-  tabBarInactiveTintColor: 'rgba(255,255,255,0.65)',
+  tabBarActiveTintColor: '#0080C1', // Brand primary blue
+  tabBarInactiveTintColor: 'rgba(0,128,193,0.5)',
   tabBarStyle: {
     height: 74,
-    borderTopWidth: 0,
-    borderTopColor: 'transparent',
-    backgroundColor: homeBgBlue,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,128,193,0.08)', // Subtle separator
+    backgroundColor: homeBgSoftBlue,
     paddingTop: 6,
     paddingBottom: 8,
   },

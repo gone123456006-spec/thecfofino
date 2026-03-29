@@ -57,7 +57,7 @@ export default function HomeScreen() {
   const { unreadCount } = useNotifications();
   const { getToken } = useAuth();
   const scalers = useScalers();
-  const { sh } = scalers;
+  const { sw, sh } = scalers;
   const insets = useSafeAreaInsets();
   const [activeSegment, setActiveSegment] = useState<Segment>('Overview');
   const [registrationStatus, setRegistrationStatus] =
@@ -241,15 +241,10 @@ export default function HomeScreen() {
     opacity: interpolate(virtualPulse.value, [1, 1.03], [1, 0.88]),
   }));
 
-  const gradientColors = ['#5BC8C6', '#3A9BC8', '#5A9FD8'] as const;
-
   return (
-    <LinearGradient colors={gradientColors} style={styles.container}>
+    <View style={styles.container}>
       <View style={styles.fullScreenContainer}>
-        {/* ── Subtle tint over bg (lighter) ───────────────────────────────── */}
-        <View pointerEvents="none" style={StyleSheet.absoluteFill} collapsable={false}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.08)' }} />
-        </View>
+
         {/* ── Navbar (with bg) ────────────────────────────────────────────── */}
         <View style={[styles.headerWrap, { paddingTop: insets.top + sh(0) }]}>
           <View style={styles.headerRow}>
@@ -366,10 +361,6 @@ export default function HomeScreen() {
 
           {/* ── Segment Tabs (blur + shine) ─────────────────────────────── */}
           <View style={styles.segmentWrap}>
-            <View style={StyleSheet.absoluteFill} pointerEvents="none">
-              <BlurView intensity={45} tint="light" style={StyleSheet.absoluteFill} />
-              <LinearGradient colors={['rgba(255,255,255,0.1)', 'transparent']} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-            </View>
             {segmentLabels.map((label: Segment) => {
               const isActive = label === activeSegment;
               return (
@@ -393,10 +384,6 @@ export default function HomeScreen() {
           {activeSegment === 'Status' ? (
             <View style={styles.segmentContent}>
               <View style={styles.statusCardWrap}>
-                <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                  <BlurView intensity={45} tint="light" style={StyleSheet.absoluteFill} />
-                  <LinearGradient colors={['rgba(255,255,255,0.12)', 'transparent']} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-                </View>
                 <Text style={styles.statusCardTitle}>Company Registration Process</Text>
                 <Text style={styles.statusCardSubtitle}>
                   {registrationStatus === 'paid' || registrationStatus === 'upload_in_progress' || registrationStatus === 'completed'
@@ -419,11 +406,7 @@ export default function HomeScreen() {
           ) : (
             <>
               {/* ── Our Services (blur + shine) ─────────────────────────────── */}
-              <View style={styles.servicesSectionWrap}>
-                <View style={StyleSheet.absoluteFill} pointerEvents="none">
-                  <BlurView intensity={45} tint="light" style={StyleSheet.absoluteFill} />
-                  <LinearGradient colors={['rgba(255,255,255,0.12)', 'transparent']} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
-                </View>
+             <View style={styles.servicesSectionWrap}>
                 <View style={styles.sectionHeader}>
                   <View style={styles.sectionDivider} />
                   <Text style={styles.sectionTitle}>Our Services</Text>
@@ -433,10 +416,15 @@ export default function HomeScreen() {
                 <View style={styles.grid}>
                   {services.map((service: ServiceItem) => (
                     <Pressable
-                      key={service.title}
+                      key={service.id}
                       onPress={() => {
-                        if (service.title === 'Company Registration') {
+                        if (service.id === 'company-registration') {
                           router.push('/company-registration');
+                        } else {
+                          router.push({
+                            pathname: '/service/[id]',
+                            params: { id: service.id }
+                          });
                         }
                       }}
                       style={({ pressed }) => [
@@ -448,8 +436,8 @@ export default function HomeScreen() {
                           <Image
                             source={service.image}
                             style={{
-                              width: sizes.cardIcon * (service.title === 'GST Filing' ? 3.05 : service.title === 'Company Registration' ? 2.25 : service.title === 'ITR Filing' ? 1.9 : service.title === 'TDS Filing' ? 1.65 : service.title === 'CFO Services' ? 1.9 : service.title === 'Invoice Financing' ? 1.75 : 2.0),
-                              height: sizes.cardIcon * (service.title === 'GST Filing' ? 3.05 : service.title === 'Company Registration' ? 2.25 : service.title === 'ITR Filing' ? 1.9 : service.title === 'TDS Filing' ? 1.65 : service.title === 'CFO Services' ? 1.9 : service.title === 'Invoice Financing' ? 1.75 : 2.0),
+                              width: sizes.cardIcon * (service.id === 'gst-filing' ? 3.05 : service.id === 'company-registration' ? 2.25 : service.id === 'itr-filing' ? 1.9 : service.id === 'tds-filing' ? 1.65 : service.id === 'cfo-services' ? 1.9 : service.id === 'invoice-financing' ? 1.75 : 2.0),
+                              height: sizes.cardIcon * (service.id === 'gst-filing' ? 3.05 : service.id === 'company-registration' ? 2.25 : service.id === 'itr-filing' ? 1.9 : service.id === 'tds-filing' ? 1.65 : service.id === 'cfo-services' ? 1.9 : service.id === 'invoice-financing' ? 1.75 : 2.0),
                             }}
                             resizeMode="contain"
                             accessibilityLabel={service.title}
@@ -490,7 +478,7 @@ export default function HomeScreen() {
                         <MaterialCommunityIcons
                           name={tool.icon}
                           size={sizes.toolIcon}
-                          color={Colors.primaryDark}
+                          color={Colors.primary}
                         />
                       </View>
                       <Text style={styles.toolLabel}>{tool.line1}{'\n'}{tool.line2}</Text>
@@ -502,7 +490,7 @@ export default function HomeScreen() {
           )}
         </ScrollView>
       </View>
-    </LinearGradient>
+    </View>
   );
 }
 

@@ -12,14 +12,15 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
   const heroLeftWidth = width * HERO_LEFT_RATIO;
   const heroRightWidth = width * (1 - HERO_LEFT_RATIO);
 
-  const glassBorder = 'rgba(255,255,255,0.2)';
-  const glassBgStrong = 'rgba(255,255,255,0.18)';
+  const glassBorder = 'rgba(0,0,0,0.06)';
+  const glassBgStrong = 'rgba(0,128,193,0.04)';
 
   return {
     width,
     styles: StyleSheet.create({
       container: {
         flex: 1,
+        backgroundColor: '#D9EFFF', // Softer, lighter sky blue
       },
       fullScreenContainer: {
         flex: 1,
@@ -78,8 +79,9 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
         width: sw(40),
         height: sw(40),
         borderRadius: sw(20),
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        borderWidth: 0,
+        backgroundColor: '#D9EFFF', // Matches soft blue home bg
+        borderWidth: 1,
+        borderColor: 'rgba(0,128,193,0.06)',
         alignItems: 'center',
         justifyContent: 'center',
       },
@@ -136,7 +138,7 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       heroRight: {
         width: heroRightWidth,
         height: HERO_HEIGHT,
-        backgroundColor: Colors.primary,
+        backgroundColor: '#0063E7', // Vibrant branding blue
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: sw(8),
@@ -191,7 +193,7 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
         fontSize: ms(28),
         fontWeight: '800',
         letterSpacing: -0.5,
-        color: '#ffffff',
+        color: '#0063E7', // High-contrast Royal Blue
         textAlign: 'center',
       },
       topicsHeadingVirtual: {
@@ -200,14 +202,18 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
 
       segmentWrap: {
         flexDirection: 'row',
-        backgroundColor: 'rgba(255,255,255,0.28)',
-        borderRadius: sw(14),
+        backgroundColor: Colors.white,
+        borderRadius: sw(16),
         padding: sw(5),
         marginTop: sh(14),
         marginBottom: sh(8),
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.4)',
-        overflow: 'hidden' as const,
+        borderColor: 'rgba(0,128,193,0.08)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 1,
       },
       segmentItem: {
         flex: 1,
@@ -221,20 +227,22 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       },
       segmentItemActive: {
         backgroundColor: Colors.white,
-        shadowColor: Colors.primaryDark,
-        shadowOffset: { width: 0, height: 2 },
+        shadowColor: 'rgba(0,128,193,0.3)',
+        shadowOffset: { width: 0, height: 3 },
         shadowOpacity: 0.15,
-        shadowRadius: 6,
-        elevation: 3,
+        shadowRadius: 10,
+        elevation: 5,
+        borderWidth: 1,
+        borderColor: 'rgba(0,128,193,0.04)',
       },
       segmentPressed: { opacity: 0.88 },
       segmentLabel: {
-        color: 'rgba(255,255,255,0.92)',
-        fontSize: ms(14),
+        color: 'rgba(0,128,193,0.5)', // Muted darker blue for contrast
+        fontSize: ms(13),
         fontWeight: '600',
       },
       segmentLabelActive: {
-        color: Colors.primary,
+        color: '#0080C1', // Brand primary blue
         fontWeight: '700',
       },
 
@@ -243,11 +251,16 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
         marginBottom: sh(8),
       },
       statusCardWrap: {
-        borderRadius: sw(20),
-        padding: sw(18),
-        overflow: 'hidden' as const,
+        borderRadius: sw(28),
+        padding: sw(20),
+        backgroundColor: Colors.white,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.35)',
+        borderColor: 'rgba(0,128,193,0.06)',
       },
       statusCardTitle: {
         fontSize: ms(18),
@@ -257,7 +270,7 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       },
       statusCardSubtitle: {
         fontSize: ms(13),
-        color: 'rgba(255,255,255,0.85)',
+        color: Colors.textSecondary,
         marginBottom: sh(12),
       },
       statusCardRow: {
@@ -287,11 +300,15 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       servicesSectionWrap: {
         borderRadius: sw(24),
         paddingHorizontal: PADDING_H,
-        paddingTop: sh(8),
-        paddingBottom: sh(10),
-        marginBottom: sh(2),
-        backgroundColor: 'transparent',
-        borderWidth: 0,
+        paddingTop: sh(16),
+        paddingBottom: sh(16),
+        marginBottom: sh(12),
+        backgroundColor: Colors.white,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
         overflow: 'hidden' as const,
       },
       sectionHeader: {
@@ -321,23 +338,23 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       },
       card: {
         width: '31.5%',
-        backgroundColor: glassBgStrong,
-        borderRadius: sw(18),
-        borderWidth: 0,
-        paddingTop: sw(6),
-        paddingBottom: sw(8),
+        backgroundColor: '#F2F4F7', // Light gray card background
+        borderRadius: sw(20),
+        paddingTop: sw(10),
+        paddingBottom: sw(12),
         paddingHorizontal: sw(6),
         alignItems: 'center',
+        borderWidth: 0,
       },
       cardPressed: { opacity: 0.94 },
       cardIconWrap: {
         width: '100%',
         height: sw(isTablet ? 90 : 70),
-        borderRadius: sw(14),
-        backgroundColor: 'rgba(255,255,255,0.25)',
+        borderRadius: sw(16),
+        backgroundColor: '#F5FAFF', // Soft inner tint
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: sw(6),
+        marginBottom: sw(8),
       },
       cardIconWrapTransparent: {
         backgroundColor: 'transparent',
@@ -355,7 +372,18 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       },
 
       toolsSectionWrap: {
-        marginBottom: sh(6),
+        borderRadius: sw(24),
+        paddingHorizontal: PADDING_H,
+        paddingTop: sh(16),
+        paddingBottom: sh(16),
+        marginBottom: sh(12),
+        backgroundColor: Colors.white,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+        overflow: 'hidden' as const,
       },
       toolsSectionHeader: {
         flexDirection: 'row',
@@ -371,35 +399,34 @@ export const createHomeStyles = ({ sw, sh, ms, width, isTablet }: Scalers) => {
       },
       toolsRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         gap: sw(8),
       },
       toolCard: {
-        flex: 1,
-        backgroundColor: 'rgba(255,255,255,0.22)',
-        borderRadius: sw(20),
-        borderWidth: 0,
+        width: sw(72),
+        backgroundColor: '#F2F4F7', // Light gray tool background
+        borderRadius: sw(18),
         paddingVertical: sh(10),
-        paddingHorizontal: sw(6),
+        paddingHorizontal: sw(2),
         alignItems: 'center',
-        minWidth: 0,
+        borderWidth: 0,
       },
       toolCardPressed: { opacity: 0.92 },
       toolIconWrap: {
         width: sw(48),
         height: sw(48),
         borderRadius: sw(16),
-        backgroundColor: 'rgba(255,255,255,0.35)',
+        backgroundColor: 'rgba(255,255,255,0.45)',
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: sh(6),
       },
       toolLabel: {
         textAlign: 'center',
-        fontSize: ms(12),
-        lineHeight: ms(16),
+        fontSize: ms(11.5),
+        lineHeight: ms(15),
         color: Colors.textPrimary,
-        fontWeight: '600',
+        fontWeight: '700',
       },
 
       contactRow: {
