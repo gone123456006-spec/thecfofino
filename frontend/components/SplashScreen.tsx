@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Image, LayoutChangeEvent, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { HeaderLogo } from '@/constants/assets';
+import { SplashIcon } from '@/constants/assets';
 
 interface SplashScreenProps {
   onFinish?: () => void;
@@ -59,7 +59,7 @@ export function SplashScreen({ onFinish, onPainted, duration = 2400 }: SplashScr
       onLayout={handleLayout}>
       <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
         <Image
-          source={HeaderLogo}
+          source={SplashIcon}
           style={styles.logo}
           resizeMode="contain"
           accessibilityLabel="Finovert Logo"
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    width: 220,
-    height: 110,
+    width: 260,
+    height: 260,
   },
 });
