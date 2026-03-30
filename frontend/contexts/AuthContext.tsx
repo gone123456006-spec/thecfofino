@@ -2,6 +2,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import {
+  deleteFirebaseUser,
+  getIdToken,
+  isFirebaseConfigured,
+  signInWithEmail,
+  signInWithGoogleIdToken,
+  signOutFirebase,
+  signUpWithEmail as firebaseSignUpWithEmail,
+} from '@/lib/firebase';
+import { useNotifications } from '@/contexts/NotificationsContext';
 import { clearCompanyRegistrationState } from '@/utils/company-registration-draft';
 
 const AUTH_KEY = '@finovert_auth';
@@ -27,8 +37,10 @@ type AuthContextValue = {
   setHasSeenWelcome: () => Promise<void>;
   /** Sign in with Google using Firebase. */
   loginWithGoogle: (idToken: string) => Promise<void>;
-  /** Sign in with email and password. */
-  loginWithEmail: (email: string, password: string, name?: string, mobile?: string) => Promise<void>;
+  /** Sign in with email and password (requires prior sign-up in the app). */
+  loginWithEmail: (email: string, password: string) => Promise<void>;
+  /** Create account with name, mobile, Gmail, and password; then opens an app session. */
+  signupWithEmail: (name: string, mobile: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   /** Get current session token for API calls. */
   getToken: () => Promise<string | null>;
@@ -42,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [hasSeenWelcome, setHasSeenWelcomeState] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const { addNotification } = useNotifications();
 
   const loadStoredAuth = useCallback(async () => {
     try {
@@ -184,8 +197,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [persistUser, handleNetworkError],
   );
 
-  const loginWithGoogle = useCallback(
-    async (idToken: string) => {
+  const exchangeFirebaseTokenForAppSession = useCallback(
+    async (idToken: string, fallbackEmail?: string) => {
       let res: Response;
       try {
         res = await fetch(`${getApiBase()}/auth/google`, {
@@ -203,50 +216,161 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch {
         throw new Error(res!.status >= 500 ? 'Server error.' : 'Invalid response.');
       }
-      if (!res!.ok) throw new Error(json.error || 'Google sign-in failed.');
-      if (!json.ok || !json.token) throw new Error(json.error || 'Google sign-in failed.');
+      if (!res!.ok) {
+        if (res!.status === 403) {
+          await signOutFirebase().catch(() => {});
+        }
+        throw new Error(json.error || 'Sign-in failed.');
+      }
+      if (json.ok && json.token) {
+        console.log('Backend: Session exchange successful.');
+      } else {
+        console.warn('Backend: Session exchange failed:', json.error);
+        throw new Error(json.error || 'Sign-in failed.');
+      }
+
       const u: User = {
         name: json.user?.name ?? '',
         mobile: json.user?.mobile ?? '',
-        email: json.user?.email ?? '',
+        email: json.user?.email ?? fallbackEmail ?? '',
       };
       await persistUser(u, json.token);
     },
     [persistUser, handleNetworkError],
   );
 
-  const loginWithEmail = useCallback(
-    async (email: string, password: string, name?: string, mobile?: string) => {
-      let res: Response;
+  const signupWithEmail = useCallback(
+    async (name: string, mobile: string, email: string, password: string) => {
+      if (!isFirebaseConfigured()) {
+        throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to frontend/.env');
+      }
+      const trimmedName = name.trim();
+      if (!trimmedName) throw new Error('Enter your name.');
+      const digits = mobile.replace(/\D/g, '').slice(-10);
+      if (digits.length !== 10) throw new Error('Enter a valid 10-digit mobile number.');
+      const normEmail = email.toLowerCase().trim();
+      const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
+      if (!gmailOk) throw new Error('Use a Gmail address (@gmail.com).');
+
+      let firebaseCred: Awaited<ReturnType<typeof firebaseSignUpWithEmail>> | null = null;
       try {
-        res = await fetch(`${getApiBase()}/auth/email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email.toLowerCase().trim(), password, name, mobile }),
+        firebaseCred = await firebaseSignUpWithEmail(normEmail, password);
+        const fbUser = firebaseCred?.user;
+        if (!fbUser) throw new Error('Could not create Firebase user.');
+        const firebaseUid = fbUser.uid;
+
+        let res: Response;
+        try {
+          res = await fetch(`${getApiBase()}/auth/signup`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: trimmedName,
+              mobile: digits,
+              email: normEmail,
+              password,
+              firebaseUid,
+            }),
+          });
+        } catch (e) {
+          handleNetworkError(e);
+        }
+
+        const text = await (res!).text();
+        let json: {
+          ok?: boolean;
+          error?: string;
+          token?: string;
+          user?: { name?: string; mobile?: string; email?: string };
+        };
+        try {
+          json = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error((res!).status >= 500 ? 'Server error.' : 'Invalid response.');
+        }
+        if (!(res!).ok) throw new Error(json.error || 'Sign-up failed.');
+        if (!json.ok || !json.token || !json.user) throw new Error(json.error || 'Sign-up failed.');
+
+        const u: User = {
+          name: json.user?.name ?? trimmedName,
+          mobile: json.user?.mobile ?? digits,
+          email: json.user?.email ?? normEmail,
+        };
+        await persistUser(u, json.token);
+        
+        // Action-based notification
+        addNotification({
+          title: 'Welcome to Finovert!',
+          body: `Congratulations ${trimmedName}! Your account has been created successfully.`,
         });
-      } catch (e) {
-        return handleNetworkError(e);
+      } catch (e: unknown) {
+        if (firebaseCred?.user) {
+          await deleteFirebaseUser(firebaseCred.user).catch(() => {});
+        }
+        await signOutFirebase().catch(() => {});
+
+        const anyErr = e as { code?: string; message?: string };
+        if (anyErr?.code === 'auth/email-already-in-use') {
+          throw new Error('This email is already registered. Try signing in.');
+        }
+        if (anyErr?.code === 'auth/weak-password') {
+          throw new Error('Password is too weak. Use at least 6 characters.');
+        }
+        if (anyErr?.code === 'auth/invalid-email') {
+          throw new Error('Invalid email address.');
+        }
+        throw e instanceof Error ? e : new Error(anyErr?.message || 'Sign-up failed.');
       }
-
-      const text = await res!.text();
-      let json: { ok?: boolean; error?: string; token?: string; user?: { name?: string; mobile?: string; email?: string } };
-      try {
-        json = text ? JSON.parse(text) : {};
-      } catch {
-        throw new Error(res!.status >= 500 ? 'Server error. Try again later.' : 'Invalid response.');
-      }
-
-      if (!res!.ok) throw new Error(json.error || 'Sign-in with email failed.');
-      if (!json.ok || !json.token) throw new Error(json.error || 'Sign-in with email failed.');
-
-      const u: User = {
-        name: json.user?.name || name || '',
-        mobile: json.user?.mobile || mobile || '',
-        email: json.user?.email || email,
-      };
-      await persistUser(u, json.token);
     },
     [persistUser, handleNetworkError],
+  );
+
+  const loginWithGoogle = useCallback(
+    async (idToken: string) => {
+      if (!isFirebaseConfigured()) {
+        throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to frontend/.env');
+      }
+      const firebaseUser = await signInWithGoogleIdToken(idToken);
+      const fbUser = firebaseUser?.user;
+      if (!fbUser) throw new Error('Failed to get Google user info.');
+      const firebaseIdToken = await getIdToken(fbUser);
+      await exchangeFirebaseTokenForAppSession(firebaseIdToken, fbUser.email ?? undefined);
+    },
+    [exchangeFirebaseTokenForAppSession],
+  );
+
+  const loginWithEmail = useCallback(
+    async (email: string, password: string) => {
+      if (!isFirebaseConfigured()) {
+        throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to frontend/.env');
+      }
+      try {
+        const cred = await signInWithEmail(email.toLowerCase().trim(), password);
+        const fbUser = cred?.user;
+        if (!fbUser) throw new Error('Firebase sign-in failed.');
+        const firebaseIdToken = await getIdToken(fbUser);
+        await exchangeFirebaseTokenForAppSession(firebaseIdToken, fbUser.email ?? email);
+
+        // Action-based notification
+        addNotification({
+          title: 'Login Successful',
+          body: 'Welcome back! You have successfully signed in.',
+        });
+      } catch (e: any) {
+        console.error('AuthContext: loginWithEmail error:', e);
+        if (e?.code === 'auth/invalid-credential' || e?.code === 'auth/wrong-password') {
+          throw new Error('Incorrect email or password.');
+        }
+        if (e?.code === 'auth/user-not-found') {
+          throw new Error('No account found for this email. Sign up first.');
+        }
+        if (e?.code === 'auth/invalid-email') {
+          throw new Error('Invalid email address.');
+        }
+        throw e;
+      }
+    },
+    [exchangeFirebaseTokenForAppSession],
   );
 
   /** Exchange Firebase ID token for app JWT. Call after Firebase sign-in (email/password or Google). */
@@ -335,6 +459,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setHasSeenWelcome,
     loginWithGoogle,
     loginWithEmail,
+    signupWithEmail,
     logout,
     getToken,
     updateProfile,

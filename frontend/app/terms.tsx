@@ -1,6 +1,6 @@
 import { Colors } from '@/constants/theme';
 import { ms, sh, sw } from '@/utils/responsive';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const TERMS_CONTENT = `These Terms and Conditions ("Terms") govern your access to and use of the services provided by the Company ("Company," "we," "our," or "us"). By accessing our website, application, or financial services, you agree to comply with these Terms and all applicable laws and regulations. If you do not agree, you must discontinue use of the services.
 
@@ -38,6 +38,14 @@ const styles = StyleSheet.create({
     lineHeight: ms(24),
     color: Colors.textSecondary,
   },
+  brandingSection: {
+    alignItems: 'center',
+    marginVertical: sh(40),
+  },
+  logo: {
+    width: sw(90),
+    height: sw(90),
+  },
 });
 
 export default function TermsScreen() {
@@ -48,6 +56,15 @@ export default function TermsScreen() {
       showsVerticalScrollIndicator={false}>
       <Text style={styles.title}>Terms and Conditions</Text>
       <Text style={styles.body}>{TERMS_CONTENT}</Text>
+      
+      {/* Clover Logo at the End */}
+      <View style={styles.brandingSection}>
+        <Image
+          source={require('@/assets/images/logogogw.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </View>
     </ScrollView>
   );
 }

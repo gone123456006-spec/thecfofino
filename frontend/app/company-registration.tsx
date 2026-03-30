@@ -22,6 +22,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { Video, ResizeMode, AVPlaybackStatus, Audio } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 import { Colors } from '@/constants/theme';
 import { companyRegistrationStyles } from '@/styles/company-registration.styles';
@@ -156,14 +157,22 @@ function formatVideoTime(ms: number): string {
 }
 
 function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) {
-  const videoRef = useRef<Video>(null);
-  const [overviewPlaying, setOverviewPlaying] = useState(false);
   const [overviewMuted, setOverviewMuted] = useState(false);
   const [overviewControlsVisible, setOverviewControlsVisible] = useState(true);
   const [showThumbnail, setShowThumbnail] = useState(true);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
   const controlsHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const player = useVideoPlayer(REGISTRATION_OVERVIEW_VIDEO, (player) => {
+    player.loop = false;
+    player.muted = overviewMuted;
+  });
+
+  useEffect(() => {
+    // Sync muted state
+    player.muted = overviewMuted;
+  }, [overviewMuted, player]);
 
   useEffect(() => {
     // Configure audio to play even on silent mode (iOS)
@@ -174,49 +183,47 @@ function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) 
       staysActiveInBackground: false,
       playThroughEarpieceAndroid: false,
     });
-  }, []);
 
-  const toggleOverviewPlayPause = async () => {
-    if (videoRef.current) {
-      if (overviewPlaying) {
-        await videoRef.current.pauseAsync();
+    const subscription = player.addListener('playingChange', (event) => {
+      if (event.isPlaying) {
+        setShowThumbnail(false);
+        if (!controlsHideTimeoutRef.current) {
+          controlsHideTimeoutRef.current = setTimeout(() => setOverviewControlsVisible(false), 3000);
+        }
       } else {
-        await videoRef.current.playAsync();
+        if (controlsHideTimeoutRef.current) {
+          clearTimeout(controlsHideTimeoutRef.current);
+          controlsHideTimeoutRef.current = null;
+        }
+        setOverviewControlsVisible(true);
       }
+    });
+
+    const statusInterval = setInterval(() => {
+      setPosition(player.currentTime * 1000);
+      setDuration(player.duration * 1000);
+    }, 500);
+
+    return () => {
+      subscription.remove();
+      clearInterval(statusInterval);
+    };
+  }, [player]);
+
+  const toggleOverviewPlayPause = () => {
+    if (player.playing) {
+      player.pause();
+    } else {
+      player.play();
     }
   };
 
-  const toggleOverviewMute = async () => {
-    const newMutedState = !overviewMuted;
-    if (videoRef.current) {
-      await videoRef.current.setIsMutedAsync(newMutedState);
-    }
-    setOverviewMuted(newMutedState);
+  const toggleOverviewMute = () => {
+    setOverviewMuted(!overviewMuted);
   };
 
   const toggleOverviewControls = () => {
     setOverviewControlsVisible((v) => !v);
-  };
-
-  const handlePlaybackStatusUpdate = (status: AVPlaybackStatus) => {
-    if (!status.isLoaded) return;
-    
-    setOverviewPlaying(status.isPlaying);
-    setPosition(status.positionMillis || 0);
-    setDuration(status.durationMillis || 0);
-    
-    if (status.isPlaying) {
-      setShowThumbnail(false);
-      if (!controlsHideTimeoutRef.current) {
-        controlsHideTimeoutRef.current = setTimeout(() => setOverviewControlsVisible(false), 3000);
-      }
-    } else {
-      if (controlsHideTimeoutRef.current) {
-        clearTimeout(controlsHideTimeoutRef.current);
-        controlsHideTimeoutRef.current = null;
-      }
-      setOverviewControlsVisible(true);
-    }
   };
 
   const progress = duration > 0 ? (position / duration) * 100 : 0;
@@ -240,16 +247,11 @@ function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) 
 
   return (
     <View style={[companyRegistrationStyles.videoWrap, customStyle]}>
-      <Video
-        ref={videoRef}
-        source={REGISTRATION_OVERVIEW_VIDEO}
+      <VideoView
+        player={player}
         style={companyRegistrationStyles.videoThumbnail}
-        resizeMode={ResizeMode.COVER}
-        isLooping={false}
-        isMuted={overviewMuted}
-        shouldPlay={false}
-        onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
-        useNativeControls={false}
+        contentFit="cover"
+        nativeControls={false}
       />
 
       {showThumbnail && (
@@ -272,7 +274,7 @@ function RegistrationOverviewVideo({ customStyle }: { customStyle?: any } = {}) 
             <Pressable onPress={toggleOverviewPlayPause} hitSlop={20}>
               <Animated.View style={[companyRegistrationStyles.videoCentrePlayBtn, playAnimatedStyle]}>
                 <Ionicons
-                  name={overviewPlaying ? 'pause' : 'play'}
+                  name={player.playing ? 'pause' : 'play'}
                   size={sw(32)}
                   color="#333333"
                 />

@@ -22,6 +22,7 @@ import {
 import {
   submitCompanyRegistrationToBackend,
   updateCompanyRegistrationInBackend,
+  fetchMyRegistrations,
 } from '@/api/company-registration';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
@@ -73,22 +74,16 @@ const getMime = (uri: string): string => {
 // FIX #1: Use string literal 'images' — MediaTypeOptions is deprecated and
 // silently breaks picker launch on some Android builds.
 async function pickFromCamera(): Promise<string | null> {
-  const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
-  if (status !== 'granted') {
-    Alert.alert(
-      'Camera Permission Required',
-      canAskAgain
-        ? 'Please allow camera access when prompted.'
-        : 'Camera was denied. Enable in Settings → App → Permissions → Camera.',
-      [{ text: 'OK' }],
-    );
-    return null;
-  }
   try {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow camera access to take photos of your documents.');
+      return null;
+    }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: 'images',
-      quality: 0.6,
-      allowsEditing: false,
+      quality: 0.7,
+      allowsEditing: true,
       base64: false,
     });
     if (result.canceled || !result.assets?.length) return null;
@@ -101,22 +96,16 @@ async function pickFromCamera(): Promise<string | null> {
 }
 
 async function pickFromGallery(): Promise<string | null> {
-  const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (status !== 'granted') {
-    Alert.alert(
-      'Gallery Permission Required',
-      canAskAgain
-        ? 'Please allow photo access when prompted.'
-        : 'Gallery was denied. Enable in Settings → App → Permissions → Photos.',
-      [{ text: 'OK' }],
-    );
-    return null;
-  }
   try {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow gallery access to upload document photos.');
+      return null;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
-      quality: 0.6,
-      allowsEditing: false,
+      quality: 0.7,
+      allowsEditing: true,
       base64: false,
     });
     if (result.canceled || !result.assets?.length) return null;
@@ -154,60 +143,50 @@ async function uriToBase64(uri: string | null): Promise<string | null> {
   const mime = getMime(uri);
   const isImage = mime.startsWith('image/');
 
-  const readFileUri = async (fileUri: string): Promise<string | null> => {
-    try {
-      const b64 = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      if (!b64) return null;
-      return `data:${mime};base64,${b64}`;
-    } catch {
-      return null;
-    }
-  };
-
-  // FIX: Android ImagePicker returns content:// URIs. Also, raw device photos are
-  // often 5-10MB which exhausts MongoDB's 16MB limit when base64-encoded.
-  // We resize to a max of 1200px width to keep payload small.
-  let workingUri = uri;
-  let tempUriToRemove: string | null = null;
-
-  if (isImage) {
-    try {
-      const manip = await manipulateAsync(
-        uri,
-        [{ resize: { width: 1200 } }],
-        { compress: 0.7, format: SaveFormat.JPEG }
-      );
-      workingUri = manip.uri;
-      tempUriToRemove = manip.uri;
-    } catch (e) {
-      console.warn('[uriToBase64] Resize failed, using original', e);
-    }
-  }
+  let localUri = uri;
+  let tempDest: string | null = null;
 
   try {
-    let result: string | null = null;
-    if (workingUri.startsWith('file://')) {
-      result = await readFileUri(workingUri);
-    } else {
-      // Handle content:// or other URIs by copying to cache
-      const rawExt = workingUri.split('.').pop()?.split('?')[0] ?? 'jpg';
-      const ext = ['jpg', 'jpeg', 'png', 'webp', 'pdf'].includes(rawExt) ? rawExt : 'jpg';
-      const dest = `${FileSystem.cacheDirectory ?? ''}upload_tmp_${Date.now()}.${ext}`;
-      await FileSystem.copyAsync({ from: workingUri, to: dest });
-      result = await readFileUri(dest);
-      FileSystem.deleteAsync(dest, { idempotent: true }).catch(() => { });
+    // Android fix for content:// URIs
+    if (Platform.OS === 'android' && uri.startsWith('content://')) {
+      const ext = uri.split('.').pop()?.split('?')[0] ?? (isImage ? 'jpg' : 'pdf');
+      tempDest = `${FileSystem.cacheDirectory}tmp_upload_${Date.now()}.${ext}`;
+      await FileSystem.copyAsync({ from: uri, to: tempDest });
+      localUri = tempDest;
     }
 
-    // Cleanup temp manipulated file if created
-    if (tempUriToRemove && tempUriToRemove.startsWith('file://')) {
-      FileSystem.deleteAsync(tempUriToRemove, { idempotent: true }).catch(() => { });
+    if (isImage) {
+      try {
+        const manip = await manipulateAsync(
+          localUri,
+          [{ resize: { width: 1200 } }],
+          { compress: 0.6, format: SaveFormat.JPEG }
+        );
+        localUri = manip.uri;
+        // If we created a tempDest for the content:// copy, we can delete it now as manip has its own temp file
+        if (tempDest) {
+          FileSystem.deleteAsync(tempDest, { idempotent: true }).catch(() => {});
+          tempDest = null;
+        }
+        tempDest = manip.uri; // track this for cleanup
+      } catch (e) {
+        console.warn('[uriToBase64] Resize failed, using original', e);
+      }
     }
 
-    return result;
+    const b64 = await FileSystem.readAsStringAsync(localUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    
+    // Cleanup
+    if (tempDest) {
+      FileSystem.deleteAsync(tempDest, { idempotent: true }).catch(() => {});
+    }
+
+    return b64 ? `data:${mime};base64,${b64}` : null;
   } catch (err) {
     console.error('[uriToBase64] failed:', err);
+    if (tempDest) FileSystem.deleteAsync(tempDest, { idempotent: true }).catch(() => {});
     return null;
   }
 }
@@ -250,6 +229,22 @@ export default function CompanyRegistrationFormScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState<string>('draft');
+  const [serverStatus, setServerStatus] = useState<string | null>(null);
+
+  const STATUS_DISPLAY: Record<string, { label: string; color: string; bg: string; icon: string }> = {
+    draft: { label: 'Draft Saved', color: '#92400e', bg: '#fef3c7', icon: 'create-outline' },
+    submitted: { label: 'Submitted', color: '#1e40af', bg: '#dbeafe', icon: 'send-outline' },
+    payment_pending: { label: 'Payment Pending', color: '#92400e', bg: '#fef3c7', icon: 'time-outline' },
+    paid: { label: 'Paid', color: '#065f46', bg: '#d1fae5', icon: 'checkmark-circle-outline' },
+    upload_in_progress: { label: 'Processing', color: '#5b21b6', bg: '#ede9fe', icon: 'sync-outline' },
+    completed: { label: 'Completed', color: '#065f46', bg: '#d1fae5', icon: 'checkmark-done-circle-outline' },
+  };
+
+  const getStatusDisplay = () => {
+    const s = (serverStatus || currentStatus).toLowerCase();
+    return STATUS_DISPLAY[s] || STATUS_DISPLAY['draft'];
+  };
 
   const openUploadModal = useCallback((target: UploadTarget) => {
     if (isPickingRef.current) return;
@@ -363,11 +358,7 @@ export default function CompanyRegistrationFormScreen() {
   };
 
   useEffect(() => {
-    (async () => {
-      // Proactive permission requests — avoids interruption during the upload flow.
-      void ImagePicker.requestCameraPermissionsAsync();
-      void ImagePicker.requestMediaLibraryPermissionsAsync();
-    })();
+    // Proactive permissions handled within pickers themselves for APK stability
   }, []);
 
   useEffect(() => {
@@ -399,9 +390,22 @@ export default function CompanyRegistrationFormScreen() {
           })));
         }
       }
+      if (state.status) {
+        setCurrentStatus(state.status);
+      }
       if (['submitted', 'payment_pending', 'paid', 'upload_in_progress', 'completed'].includes(state.status)) {
         setAlreadySubmitted(true);
       }
+      
+      // Fetch server status for accuracy
+      try {
+        const token = await getToken();
+        if (token) {
+          const list = await fetchMyRegistrations(token);
+          if (list?.[0]?.status) setServerStatus(list[0].status);
+        }
+      } catch (_) {}
+
       setIsHydrated(true);
     })();
   }, []);
@@ -668,8 +672,25 @@ export default function CompanyRegistrationFormScreen() {
 
           {caseId && (
             <View style={companyRegistrationFormStyles.caseCard}>
-              <Text style={companyRegistrationFormStyles.caseCardTitle}>Your Case ID</Text>
-              <Text style={companyRegistrationFormStyles.caseIdText} selectable>{caseId}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sh(12) }}>
+                <View>
+                  <Text style={companyRegistrationFormStyles.caseCardTitle}>Your Case ID</Text>
+                  <Text style={companyRegistrationFormStyles.caseIdText} selectable>{caseId}</Text>
+                </View>
+                {/* Registration Status Badge */}
+                <View style={{ 
+                  flexDirection: 'row', 
+                  alignItems: 'center', 
+                  gap: 6, 
+                  paddingHorizontal: 10, 
+                  paddingVertical: 5, 
+                  borderRadius: 20, 
+                  backgroundColor: getStatusDisplay().bg 
+                }}>
+                  <Ionicons name={getStatusDisplay().icon as any} size={14} color={getStatusDisplay().color} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: getStatusDisplay().color }}>{getStatusDisplay().label}</Text>
+                </View>
+              </View>
               <Text style={companyRegistrationFormStyles.caseCardHint}>Complete director details below and submit. This case will appear in the dashboard.</Text>
             </View>
           )}

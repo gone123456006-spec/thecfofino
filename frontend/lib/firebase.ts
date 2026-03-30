@@ -1,89 +1,56 @@
-/**
- * Firebase (client) — init and auth helpers.
- * Set EXPO_PUBLIC_FIREBASE_* in .env (from Firebase Console → Project settings).
- * Only initializes when apiKey and projectId are set to avoid uncaught errors.
- */
-import { getApp, getApps, initializeApp, type FirebaseApp } from 'firebase/app';
-import {
-  getAuth,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signInWithCredential,
-  GoogleAuthProvider,
-  type Auth,
-  type User,
-  type UserCredential,
-} from 'firebase/auth';
+// lib/firebase.ts
+import { auth, firebaseApp } from './firebaseConfig';
+import firebase from 'firebase/compat/app';
 
-const firebaseConfig = {
-  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? '',
-  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN ?? '',
-  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? '',
-  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET ?? '',
-  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? '',
-  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID ?? '',
-};
-
-const hasValidConfig = !!(firebaseConfig.apiKey && firebaseConfig.projectId);
-
-let app: FirebaseApp | null = null;
-if (!getApps().length && hasValidConfig) {
-  try {
-    app = initializeApp(firebaseConfig);
-  } catch (e) {
-    console.warn('Firebase init failed:', e);
-  }
-} else if (getApps().length) {
-  app = getApp();
-}
-
-export const auth: Auth | null = app ? getAuth(app) : null;
+// Re-export for convenience
+export const firebaseAuth = auth;
+export { firebaseApp };
 
 export function isFirebaseConfigured(): boolean {
-  return !!auth;
+  // Hardcoded in config, so it's always true
+  return true;
 }
 
-export async function signUpWithEmail(email: string, password: string): Promise<UserCredential> {
-  if (!auth) throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to .env');
-  return createUserWithEmailAndPassword(auth, email, password);
+export async function signUpWithEmail(email: string, password: string) {
+  return auth.createUserWithEmailAndPassword(email, password);
 }
 
-export async function signInWithEmail(email: string, password: string): Promise<UserCredential> {
-  if (!auth) throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to .env');
-  return signInWithEmailAndPassword(auth, email, password);
+export async function deleteFirebaseUser(user: any) {
+  return (user as firebase.User).delete();
+}
+
+export async function signInWithEmail(email: string, password: string) {
+  console.log('Firebase: Attempting sign-in for:', email);
+  return auth.signInWithEmailAndPassword(email, password);
 }
 
 /** Sign in to Firebase with Google id token (e.g. from expo-auth-session). */
-export async function signInWithGoogleIdToken(idToken: string): Promise<UserCredential> {
-  if (!auth) throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to .env');
-  
+export async function signInWithGoogleIdToken(idToken: string) {
   try {
-    const credential = GoogleAuthProvider.credential(idToken);
-    return signInWithCredential(auth, credential);
+    const credential = firebase.auth.GoogleAuthProvider.credential(idToken);
+    return auth.signInWithCredential(credential);
   } catch (error: any) {
     console.error('Firebase Google Sign-In Error:', error.code, error.message);
     throw new Error(
       error.code === 'auth/invalid-credential'
         ? 'Invalid Google ID token. Please try again.'
-        : error.message || 'Failed to sign in with Google'
+        : error.message || 'Failed to sign in with Google',
     );
   }
 }
 
-export async function getIdToken(user: User): Promise<string> {
-  return user.getIdToken();
+export async function getIdToken(user: any): Promise<string> {
+  return (user as firebase.User).getIdToken();
 }
 
-export async function getUserEmail(user: User): Promise<string | null> {
-  return user.email || null;
+export async function getUserEmail(user: any): Promise<string | null> {
+  return (user as firebase.User).email || null;
 }
 
-export async function getUserName(user: User): Promise<string | null> {
-  return user.displayName || null;
+export async function getUserName(user: any): Promise<string | null> {
+  return (user as firebase.User).displayName || null;
 }
 
 export function signOutFirebase(): Promise<void> {
-  if (!auth) throw new Error('Firebase is not configured');
   return auth.signOut();
 }
-

@@ -1,6 +1,6 @@
 import { Colors } from '@/constants/theme';
 import { ms, sh, sw } from '@/utils/responsive';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const PRIVACY_CONTENT = `This Privacy Policy explains how the Company ("Company," "we," "our," or "us") collects, uses, stores, and protects your personal information when you access our website, mobile application, or financial services. By using our services, you consent to the practices described in this Policy.
 
@@ -19,10 +19,10 @@ We may update this Privacy Policy periodically. Continued use of services after 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.white,
   },
   scrollContent: {
-    padding: sw(20),
+    padding: sw(24),
     paddingBottom: sh(40),
   },
   title: {
@@ -36,6 +36,14 @@ const styles = StyleSheet.create({
     lineHeight: ms(24),
     color: Colors.textSecondary,
   },
+  brandingSection: {
+    alignItems: 'center',
+    marginVertical: sh(40),
+  },
+  logo: {
+    width: sw(90),
+    height: sw(90),
+  },
 });
 
 export default function PrivacyScreen() {
@@ -46,6 +54,15 @@ export default function PrivacyScreen() {
       showsVerticalScrollIndicator={false}>
       <Text style={styles.title}>Privacy Policy</Text>
       <Text style={styles.body}>{PRIVACY_CONTENT}</Text>
+
+      {/* Clover Logo at the End */}
+      <View style={styles.brandingSection}>
+        <Image
+          source={require('@/assets/images/logogogw.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+      </View>
     </ScrollView>
   );
 }

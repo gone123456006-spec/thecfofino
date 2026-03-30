@@ -13,7 +13,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { makeRedirectUri } from 'expo-auth-session';
+import Constants from 'expo-constants';
 
 import { HeaderLogo } from '@/constants/assets';
 import { Colors } from '@/constants/theme';
@@ -24,11 +26,14 @@ import { Ionicons } from '@expo/vector-icons';
 
 let GoogleSignin: any = null;
 let isNativeGoogleSignInAvailable = false;
+let googleStatusCodes: any = null;
 
 try {
-  if (Platform.OS !== 'web') {
-    // Dynamically require to prevent top-level import crashes in Expo Go
-    GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
+  // Expo Go can't use this native module reliably; use AuthSession there.
+  if (Platform.OS !== 'web' && Constants.appOwnership !== 'expo') {
+    const gs = require('@react-native-google-signin/google-signin');
+    GoogleSignin = gs.GoogleSignin;
+    googleStatusCodes = gs.statusCodes;
     GoogleSignin.configure({
       webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB,
       iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
@@ -36,7 +41,7 @@ try {
     isNativeGoogleSignInAvailable = true;
   }
 } catch (error) {
-  console.warn('Native Google Sign-In module is not available. Falling back to Web Browser Auth.');
+  isNativeGoogleSignInAvailable = false;
 }
 
 WebBrowser.maybeCompleteAuthSession();
@@ -45,14 +50,38 @@ export function LoginScreen() {
   const scalers = useScalers();
   const { sh, sw, ms, height } = scalers;
   const authStyles = useMemo(() => createAuthStyles(scalers), [scalers]);
-  const { loginWithGoogle, loginWithEmail } = useAuth();
+  const { loginWithGoogle, loginWithEmail, signupWithEmail } = useAuth();
   const insets = useSafeAreaInsets();
   const headerHeight = Math.min(height * 0.30, 200);
 
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [name, setName] = useState('');
+  const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB ?? '';
+  const isExpoGo = Constants.appOwnership === 'expo';
+
+  // Use Auth Code + PKCE (Google policy compliant).
+  const discovery = AuthSession.useAutoDiscovery('https://accounts.google.com');
+  const redirectUri =
+    Platform.OS === 'web'
+      ? makeRedirectUri({ scheme: 'finovert' })
+      : 'https://auth.expo.io/@shyamhero/finovert';
+
+  const [googleRequest, googleResponse, googlePromptAsync] = AuthSession.useAuthRequest(
+    {
+      clientId: webClientId,
+      redirectUri,
+      scopes: ['openid', 'profile', 'email'],
+      responseType: AuthSession.ResponseType.Code,
+      usePKCE: true,
+      extraParams: { prompt: 'select_account' },
+    },
+    discovery,
+  );
 
   // ── Google Sign-In ──────────────────────────────────────────────────────────
   const handleGoogleSignIn = useCallback(async (idToken: string | undefined) => {
@@ -71,13 +100,26 @@ export function LoginScreen() {
     }
   }, [loginWithGoogle]);
 
+  const openWebGoogleAuth = useCallback(async () => {
+    if (!webClientId || !webClientId.trim()) {
+      Alert.alert('Google Sign-In not configured', 'Missing EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB in frontend/.env');
+      return;
+    }
+    if (!googleRequest) {
+      Alert.alert('Error', 'Google sign-in is not ready yet. Please try again.');
+      return;
+    }
+    const result = await googlePromptAsync();
+    if (result.type !== 'success') return;
+  }, [webClientId, googleRequest, googlePromptAsync]);
+
   const handleGooglePress = useCallback(async () => {
     setLoading(true);
     try {
-      if (Platform.OS !== 'web' && isNativeGoogleSignInAvailable) {
+      if (!isExpoGo && Platform.OS !== 'web' && isNativeGoogleSignInAvailable) {
         // Native Google Sign-In
         await GoogleSignin.hasPlayServices();
-        const userInfo = await GoogleSignin.signIn();
+        await GoogleSignin.signIn();
         const tokens = await GoogleSignin.getTokens();
         
         if (tokens.idToken) {
@@ -86,72 +128,105 @@ export function LoginScreen() {
           Alert.alert('Error', 'Missing ID token from Google Sign In');
         }
       } else {
-        // WebBrowser Fallback (Web, iOS Expo Go, Android Expo Go)
-        const clientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB;
-        const proxyRedirectUri = Platform.OS === 'web'
-          ? makeRedirectUri({ scheme: 'finovert' })
-          : 'https://auth.expo.io/@shyamhero/finovert';
-
-        const authUrl =
-          `https://accounts.google.com/o/oauth2/v2/auth?` +
-          `client_id=${clientId}` +
-          `&redirect_uri=${encodeURIComponent(proxyRedirectUri)}` +
-          `&response_type=id_token` +
-          `&scope=${encodeURIComponent('openid profile email')}` +
-          `&nonce=${Math.random().toString(36).substring(7)}` +
-          `&prompt=select_account`;
-
-        const result = await WebBrowser.openAuthSessionAsync(authUrl, proxyRedirectUri);
-
-        if (result.type === 'success' && result.url) {
-          const hash = result.url.split('#')[1];
-          const params = new URLSearchParams(hash || '');
-          const idToken = params.get('id_token');
-          if (idToken) {
-            await handleGoogleSignIn(idToken);
-          } else {
-            Alert.alert('Error', 'No ID token found in Google response.');
-          }
-        }
+        await openWebGoogleAuth();
       }
     } catch (error: any) {
       if (error.code === 'SIGN_IN_CANCELLED') {
         // user cancelled the login flow
       } else if (error.code === 'IN_PROGRESS') {
         // operation (e.g. sign in) is in progress already
+      } else if (googleStatusCodes && error.code === googleStatusCodes.DEVELOPER_ERROR) {
+        // Wrong native client setup; fall back instead of hard-failing user login.
+        await openWebGoogleAuth();
       } else {
         Alert.alert('Error', error?.message || 'Failed to sign in with Google');
       }
     } finally {
       setLoading(false);
     }
-  }, [handleGoogleSignIn]);
+  }, [handleGoogleSignIn, isExpoGo, openWebGoogleAuth]);
 
-  // ── Email Sign-In ───────────────────────────────────────────────────────────
-  const handleEmailSignIn = useCallback(async () => {
+  React.useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!googleResponse || googleResponse.type !== 'success') return;
+      const code = googleResponse.params?.code;
+      if (!code || !discovery) {
+        Alert.alert('Error', 'Google sign-in failed (missing auth code).');
+        return;
+      }
+      try {
+        const tokenRes = await AuthSession.exchangeCodeAsync(
+          {
+            clientId: webClientId || '',
+            code,
+            redirectUri,
+            extraParams: {
+              code_verifier: googleRequest?.codeVerifier || '',
+            },
+          },
+          discovery,
+        );
+        if (cancelled) return;
+        if (tokenRes.idToken) {
+          await handleGoogleSignIn(tokenRes.idToken);
+        } else {
+          Alert.alert('Error', 'Google sign-in failed (missing ID token).');
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        Alert.alert('Error', e?.message || 'Google sign-in failed.');
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [googleResponse, discovery, webClientId, redirectUri, googleRequest?.codeVerifier, handleGoogleSignIn]);
+
+  // ── Email sign-in / sign-up (Gmail + password) ────────────────────────────
+  const handleEmailAuth = useCallback(async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert('Error', 'Please enter your email and password');
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+    const normEmail = email.toLowerCase().trim();
+    const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
+    if (!gmailOk) {
+      Alert.alert('Error', 'Use a Gmail address (@gmail.com)');
       return;
     }
     if (password.length < 6) {
       Alert.alert('Error', 'Password must be at least 6 characters');
       return;
     }
+    if (mode === 'signup') {
+      if (!name.trim()) {
+        Alert.alert('Error', 'Please enter your name');
+        return;
+      }
+      const digits = mobile.replace(/\D/g, '').slice(-10);
+      if (digits.length !== 10) {
+        Alert.alert('Error', 'Enter a valid 10-digit mobile number');
+        return;
+      }
+    }
     setLoading(true);
     try {
-      await loginWithEmail(email, password);
-      // Navigation is driven by _layout
+      if (mode === 'signup') {
+        await signupWithEmail(name, mobile, email, password);
+      } else {
+        await loginWithEmail(email, password);
+      }
     } catch (error: any) {
-      Alert.alert('Sign-In Failed', error?.message || 'Failed to sign in');
+      Alert.alert(
+        mode === 'signup' ? 'Sign-up failed' : 'Sign-in failed',
+        error?.message || (mode === 'signup' ? 'Could not create account' : 'Failed to sign in'),
+      );
     } finally {
       setLoading(false);
     }
-  }, [email, password, loginWithEmail]);
+  }, [email, password, mode, name, mobile, loginWithEmail, signupWithEmail]);
 
   return (
     <KeyboardAvoidingView
@@ -181,7 +256,7 @@ export function LoginScreen() {
               authStyles.loginHeaderTitle,
               { fontSize: ms(14), fontWeight: '600', opacity: 0.85, marginTop: sh(6) },
             ]}>
-            Sign in to continue
+            {mode === 'signup' ? 'Create your account' : 'Sign in to continue'}
           </Text>
         </View>
 
@@ -196,6 +271,35 @@ export function LoginScreen() {
               accessibilityLabel="Finovert"
             />
           </View>
+
+          {mode === 'signup' ? (
+            <>
+              <View style={{ marginBottom: sh(14) }}>
+                <Text style={authStyles.loginLabel}>Full name</Text>
+                <TextInput
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Your name"
+                  placeholderTextColor={Colors.textMuted}
+                  style={authStyles.loginInput}
+                  autoCapitalize="words"
+                  editable={!loading}
+                />
+              </View>
+              <View style={{ marginBottom: sh(14) }}>
+                <Text style={authStyles.loginLabel}>Mobile number</Text>
+                <TextInput
+                  value={mobile}
+                  onChangeText={setMobile}
+                  placeholder="10-digit mobile"
+                  placeholderTextColor={Colors.textMuted}
+                  style={authStyles.loginInput}
+                  keyboardType="phone-pad"
+                  editable={!loading}
+                />
+              </View>
+            </>
+          ) : null}
 
           {/* Email Input */}
           <View style={{ marginBottom: sh(14) }}>
@@ -238,9 +342,9 @@ export function LoginScreen() {
             </View>
           </View>
 
-          {/* Sign In Button */}
+          {/* Sign In / Sign up */}
           <Pressable
-            onPress={handleEmailSignIn}
+            onPress={handleEmailAuth}
             disabled={loading}
             style={({ pressed }) => [
               authStyles.loginSubmitButton,
@@ -249,8 +353,19 @@ export function LoginScreen() {
             {loading ? (
               <ActivityIndicator size="small" color={Colors.textOnPrimary} />
             ) : (
-              <Text style={authStyles.loginSubmitText}>Sign In</Text>
+              <Text style={authStyles.loginSubmitText}>
+                {mode === 'signup' ? 'Create account' : 'Sign In'}
+              </Text>
             )}
+          </Pressable>
+
+          <Pressable
+            onPress={() => setMode(m => (m === 'signin' ? 'signup' : 'signin'))}
+            disabled={loading}
+            style={{ marginTop: sh(14), alignSelf: 'center' }}>
+            <Text style={{ fontSize: ms(14), color: Colors.primary, fontWeight: '600' }}>
+              {mode === 'signin' ? 'New here? Create an account' : 'Already have an account? Sign in'}
+            </Text>
           </Pressable>
 
           {/* OR Divider */}

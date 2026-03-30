@@ -110,7 +110,6 @@ function RootLayoutContent() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <NotificationsProvider>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
@@ -200,7 +199,6 @@ function RootLayoutContent() {
         />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
-      </NotificationsProvider>
       <StatusBar style="dark" />
     </ThemeProvider>
   );
@@ -209,9 +207,11 @@ function RootLayoutContent() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <RootLayoutContent />
-      </AuthProvider>
+      <NotificationsProvider>
+        <AuthProvider>
+          <RootLayoutContent />
+        </AuthProvider>
+      </NotificationsProvider>
     </SafeAreaProvider>
   );
 }
