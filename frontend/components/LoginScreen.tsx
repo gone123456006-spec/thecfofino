@@ -54,6 +54,9 @@ export function LoginScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = Math.min(height * 0.30, 200);
 
+  // Keep Google button visible but disable it for now (future toggle can re-enable).
+  const googleSignInDisabled = true;
+
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [name, setName] = useState('');
@@ -366,41 +369,6 @@ export function LoginScreen() {
             <Text style={{ fontSize: ms(14), color: Colors.primary, fontWeight: '600' }}>
               {mode === 'signin' ? 'New here? Create an account' : 'Already have an account? Sign in'}
             </Text>
-          </Pressable>
-
-          {/* OR Divider */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: sh(22), gap: sw(10) }}>
-            <View style={{ flex: 1, height: 1, backgroundColor: Colors.borderLight }} />
-            <Text style={{ fontSize: ms(13), color: Colors.textMuted }}>OR</Text>
-            <View style={{ flex: 1, height: 1, backgroundColor: Colors.borderLight }} />
-          </View>
-
-          {/* Sign in with Google */}
-          <Pressable
-            onPress={handleGooglePress}
-            disabled={loading}
-            style={({ pressed }) => ({
-              backgroundColor: Colors.surface,
-              paddingVertical: sh(14),
-              borderRadius: sw(12),
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexDirection: 'row',
-              gap: sw(10),
-              borderWidth: 1.5,
-              borderColor: '#e0e0e0',
-              opacity: loading ? 0.6 : pressed ? 0.85 : 1,
-            })}>
-            {loading ? (
-              <ActivityIndicator size="small" color={Colors.primary} />
-            ) : (
-              <>
-                <Ionicons name="logo-google" size={ms(20)} color="#4285F4" />
-                <Text style={{ fontSize: ms(15), fontWeight: '600', color: Colors.textSecondary }}>
-                  Sign in with Google
-                </Text>
-              </>
-            )}
           </Pressable>
 
           <Text style={[authStyles.loginSecureNote, { marginTop: sh(28) }]}>

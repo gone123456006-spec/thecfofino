@@ -15,29 +15,29 @@ export function TaglineScreen({ onFinish, typingSpeed = 70 }: TaglineScreenProps
 
   useEffect(() => {
     let index = 0;
+    let finishTimer: ReturnType<typeof setTimeout> | null = null;
     const interval = setInterval(() => {
       if (index < fullText.length) {
         setDisplayedText(fullText.slice(0, index + 1));
         index++;
       } else {
         clearInterval(interval);
-        // Small delay after finishing typing before moving on
-        const timer = setTimeout(() => {
-          if (onFinish) onFinish();
-        }, 1200);
-        return () => clearTimeout(timer);
+        finishTimer = setTimeout(() => onFinish?.(), 1200);
       }
     }, typingSpeed);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (finishTimer) clearTimeout(finishTimer);
+    };
   }, [onFinish, typingSpeed]);
 
   return (
     <LinearGradient
-      colors={['#e3f2fd', '#ffffff', '#e1f5fe']}
+      colors={['#dbeafe', '#e3f2fd', '#ffffff', '#e1f5fe']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      locations={[0, 0.5, 1]}
+      locations={[0, 0.28, 0.58, 1]}
       style={styles.container}>
       <View style={styles.textContainer}>
         <Text style={styles.tagline}>

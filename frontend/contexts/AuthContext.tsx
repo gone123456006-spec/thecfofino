@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 import {
   deleteFirebaseUser,
@@ -21,6 +22,8 @@ const WELCOME_KEY = '@finovert_welcome_seen';
 /** Backend API base. Set EXPO_PUBLIC_API_URL in .env for physical device (e.g. http://192.168.1.5:4000/api). */
 function getApiBase(): string {
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  const fromExtra = (Constants.expoConfig?.extra as { apiBaseUrl?: string } | undefined)?.apiBaseUrl;
+  if (fromExtra) return fromExtra;
   return 'https://finovert-backend.onrender.com/api';
 }
 

@@ -5,11 +5,13 @@ import { ms, sh, sw } from '@/utils/responsive';
 export const companyRegistrationFormStyles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: Colors.white,
   },
   scrollContent: {
     padding: sw(20),
     paddingBottom: sh(48),
+    flexGrow: 1,
+    minHeight: '100%',
   },
   progressBar: {
     flexDirection: 'row',

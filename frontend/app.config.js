@@ -17,6 +17,7 @@ module.exports = {
     ...appJson.expo,
     extra: {
       ...appJson.expo.extra,
+      apiBaseUrl: process.env.EXPO_PUBLIC_API_URL,
       firebase: {
         apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
         authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,

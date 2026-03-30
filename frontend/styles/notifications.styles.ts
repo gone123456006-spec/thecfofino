@@ -10,6 +10,65 @@ export const styles = StyleSheet.create({
     paddingTop: sh(12),
   },
 
+  header: {
+    marginBottom: sh(12),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: sw(12),
+  },
+
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sw(10),
+  },
+
+  headerTitle: {
+    fontSize: ms(18),
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+
+  badge: {
+    minWidth: sw(26),
+    height: sw(22),
+    paddingHorizontal: sw(8),
+    borderRadius: sw(16),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+  },
+
+  badgeText: {
+    color: Colors.white,
+    fontSize: ms(12),
+    fontWeight: '800',
+  },
+
+  markAllBtn: {
+    paddingVertical: sh(8),
+    paddingHorizontal: sw(12),
+    borderRadius: sw(12),
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.borderLight,
+  },
+
+  markAllBtnDisabled: {
+    opacity: 0.5,
+  },
+
+  markAllBtnText: {
+    fontSize: ms(13),
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+
+  markAllBtnTextDisabled: {
+    color: Colors.textMuted,
+  },
+
   // ─── Empty state ─────────────────────────────────────────────────────────
 
   emptyWrap: {
@@ -17,11 +76,6 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: sw(12),
-  },
-  emptyText: {
-    fontSize: ms(16),
-    color: Colors.textMuted,
-    fontWeight: '500',
   },
 
   // ─── Notification card ───────────────────────────────────────────────────

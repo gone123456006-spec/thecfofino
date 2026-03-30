@@ -2,9 +2,8 @@
 //  Finovert Admin Dashboard — app.js
 // ═══════════════════════════════════════════════════════════════════
 
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? window.location.origin + '/api'
-  : 'https://finovert-backend.onrender.com/api';
+// Always use the same backend that serves this dashboard
+const API = window.location.origin + '/api';
 let TOKEN = localStorage.getItem('finovert_token') || null;
 let currentTab = 'overview';
 
@@ -84,6 +83,152 @@ function closeModal(id) {
 
 function openModal(id) {
   document.getElementById(id).classList.remove('hidden');
+}
+
+function openNotificationModal(userId) {
+  document.getElementById('notification-modal-user-id').value = userId;
+  document.getElementById('notification-modal-title').value = '';
+  document.getElementById('notification-modal-body').value = '';
+  openModal('notification-modal');
+}
+
+async function submitNotificationToUser() {
+  const userId = document.getElementById('notification-modal-user-id').value;
+  const title = document.getElementById('notification-modal-title').value.trim();
+  const body = document.getElementById('notification-modal-body').value.trim();
+
+  if (!userId) return;
+  if (!title) return showToast('Please enter a title.', 'error');
+  if (!body) return showToast('Please enter a message.', 'error');
+
+  try {
+    await apiFetch('/notifications/admin/send', {
+      method: 'POST',
+      body: JSON.stringify({ userId, title, body }),
+    });
+    closeModal('notification-modal');
+    showToast('Notification sent to user.', 'success');
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
+// ─── CHAT (Admin <-> User) ─────────────────────────────────────────────
+
+let chatPollTimer = null;
+let currentChatUserId = null;
+let lastSentChat = { userId: null, text: '', atMs: 0 };
+
+function startChatPolling(userId) {
+  if (chatPollTimer) clearInterval(chatPollTimer);
+  currentChatUserId = userId;
+
+  // Load immediately
+  void loadChatMessages().catch(() => {});
+
+  chatPollTimer = setInterval(() => {
+    void loadChatMessages().catch(() => {});
+  }, 5000);
+}
+
+function stopChatPolling() {
+  if (chatPollTimer) {
+    clearInterval(chatPollTimer);
+    chatPollTimer = null;
+  }
+  currentChatUserId = null;
+}
+
+function closeChatModal() {
+  stopChatPolling();
+  closeModal('chat-modal');
+}
+
+async function loadChatMessages() {
+  const userId = currentChatUserId;
+  if (!userId) return;
+
+  const box = document.getElementById('chat-modal-messages');
+  if (!box) return;
+  box.innerHTML = '<div class="loading-msg" style="margin-top: 20px;">Loading messages…</div>';
+
+  try {
+    const data = await apiFetch(`/messages/admin/user/${encodeURIComponent(userId)}`);
+    const messages = data.messages || [];
+
+    if (!messages.length) {
+      box.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:6px 2px;">No messages yet.</div>';
+      return;
+    }
+
+    let didTick = false;
+    box.innerHTML = messages
+      .map((m) => {
+        const isAdmin = m.fromRole === 'admin';
+        const align = isAdmin ? 'flex-end' : 'flex-start';
+        const bubbleBg = isAdmin ? 'rgba(59,130,246,0.12)' : 'rgba(16,185,129,0.10)';
+        const bubbleBorder = isAdmin ? 'rgba(59,130,246,0.35)' : 'rgba(16,185,129,0.30)';
+        const who = isAdmin ? 'Admin' : 'User';
+        const text = String(m.text ?? '');
+
+        const mText = text.trim();
+        const msgTimeMs = Date.parse(String(m.time ?? ''));
+        const shouldTick =
+          isAdmin &&
+          lastSentChat.userId === userId &&
+          lastSentChat.text.trim() === mText &&
+          !Number.isNaN(msgTimeMs) &&
+          Date.now() - msgTimeMs < 15000;
+
+        if (shouldTick) didTick = true;
+
+        const tickHtml = shouldTick ? `<div class="chat-sent-tick"><i class="fa-solid fa-check"></i></div>` : '';
+
+        return `
+          <div style="display:flex;justify-content:${align};margin:8px 0;">
+            <div style="max-width: 78%;background:${bubbleBg};border:1px solid ${bubbleBorder};padding:10px 12px;border-radius:14px;position:relative;">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:4px;">${who}</div>
+              <div style="white-space:pre-wrap;word-break:break-word;font-size:13px;">${text}</div>
+              ${tickHtml}
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    if (didTick) {
+      lastSentChat = { userId: null, text: '', atMs: 0 };
+    }
+  } catch (err) {
+    box.innerHTML = `<div class="loading-msg" style="color:var(--danger);margin-top:20px;">Error: ${err.message}</div>`;
+  }
+}
+
+function openChatModal(userId) {
+  currentChatUserId = userId;
+  document.getElementById('chat-modal-user-id').value = userId;
+  document.getElementById('chat-modal-text').value = '';
+  openModal('chat-modal');
+  startChatPolling(userId);
+}
+
+async function submitChatMessage() {
+  const userId = document.getElementById('chat-modal-user-id').value;
+  const text = document.getElementById('chat-modal-text').value.trim();
+  if (!userId) return;
+  if (!text) return showToast('Please type a message.', 'error');
+
+  try {
+    await apiFetch('/messages/admin/send', {
+      method: 'POST',
+      body: JSON.stringify({ userId, text }),
+    });
+    document.getElementById('chat-modal-text').value = '';
+    lastSentChat = { userId, text, atMs: Date.now() };
+    await loadChatMessages();
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
 }
 
 // ─── TIME ──────────────────────────────────────────────────────────
@@ -725,9 +870,19 @@ async function loadAppUsers() {
               <td>${u.lastLoginAt ? fmt(u.lastLoginAt) : '—'}</td>
               <td>${fmtDate(u.createdAt)}</td>
               <td>
-                <button class="btn btn-danger" onclick="deleteUser('${u._id}')">
-                  <i class="fa-solid fa-trash"></i>
-                </button>
+                <div style="display:flex;gap:10px;align-items:center;">
+                  <button class="btn btn-primary" onclick="openNotificationModal('${u._id}')"
+                    title="Send notification to this user">
+                    <i class="fa-solid fa-paper-plane"></i>
+                  </button>
+                  <button class="btn btn-success" onclick="openChatModal('${u._id}')"
+                    title="Chat with this user">
+                    <i class="fa-solid fa-comment-dots"></i>
+                  </button>
+                  <button class="btn btn-danger" onclick="deleteUser('${u._id}')" title="Delete user">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </div>
               </td>
             </tr>`).join('')}
         </tbody>

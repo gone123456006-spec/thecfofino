@@ -10,6 +10,8 @@ const paymentRoutes = require('./routes/payments');
 const statusRoutes = require('./routes/status');
 const otpRoutes = require('./routes/otp');
 const usersRoutes = require('./routes/users');
+const notificationsRoutes = require('./routes/notifications');
+const messagesRoutes = require('./routes/messages');
 const User = require('./models/User');
 
 const app = express();
@@ -54,6 +56,8 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/status', statusRoutes);
 app.use('/api/otp', otpRoutes);
 app.use('/api/users', usersRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/messages', messagesRoutes);
 
 // ─── Start Server ─────────────────────────────────────────────────
 let httpServer = null;

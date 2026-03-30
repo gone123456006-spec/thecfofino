@@ -1,12 +1,14 @@
+import '@/lib/splash-hold';
+
 import { Ionicons } from '@expo/vector-icons';
 import * as SplashScreenNative from 'expo-splash-screen';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { Pressable } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { LoginScreen } from '@/components/LoginScreen';
 import { CreateProfileScreen } from '@/components/CreateProfileScreen';
@@ -38,33 +40,41 @@ export const unstable_settings = {
 
 function RootLayoutContent() {
   const colorScheme = useColorScheme();
-  const { user, isReady, hasSeenWelcome } = useAuth();
+  const { user, hasSeenWelcome } = useAuth();
   const [showSplash, setShowSplash] = useState(true);
   const [showTagline, setShowTagline] = useState(false);
+  const nativeSplashHiddenRef = useRef(false);
+
+  const hideNativeSplash = useCallback(async () => {
+    if (nativeSplashHiddenRef.current) return;
+    nativeSplashHiddenRef.current = true;
+    try {
+      SplashScreenNative.setOptions({ fade: true, duration: 280 });
+    } catch {
+      /* Expo Go or older native module */
+    }
+    await SplashScreenNative.hideAsync();
+  }, []);
 
   useEffect(() => {
-    // Hide the native splash screen as soon as this component mounts
-    SplashScreenNative.hideAsync().catch(() => {});
-
-    if (isReady && showSplash) {
-      // Small delay for the initial logo animation to breathe
-      const timer = setTimeout(() => {
-        setShowSplash(false);
-        setShowTagline(true);
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [isReady, showSplash]);
+    if (!showSplash) return;
+    const fallback = setTimeout(() => void hideNativeSplash(), 4000);
+    return () => clearTimeout(fallback);
+  }, [showSplash, hideNativeSplash]);
 
   if (showSplash) {
     return (
       <>
-        <SplashScreen onFinish={() => {
-          if (isReady) {
+        <SplashScreen
+          duration={2600}
+          onPainted={() => {
+            void hideNativeSplash();
+          }}
+          onFinish={() => {
             setShowSplash(false);
             setShowTagline(true);
-          }
-        }} />
+          }}
+        />
         <StatusBar style="dark" />
       </>
     );
@@ -97,7 +107,6 @@ function RootLayoutContent() {
     );
   }
 
-  // Logged in but profile not yet complete (no name or phone)
   const needsProfile = !user.name || !user.mobile;
   if (needsProfile) {
     return (

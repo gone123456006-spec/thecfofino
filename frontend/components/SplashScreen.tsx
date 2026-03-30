@@ -1,56 +1,63 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Image, View, StyleSheet } from 'react-native';
+import { Animated, Easing, Image, LayoutChangeEvent, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors } from '@/constants/theme';
 import { HeaderLogo } from '@/constants/assets';
 
 interface SplashScreenProps {
   onFinish?: () => void;
+  /** Called once after the splash view has laid out — hide the native splash then. */
+  onPainted?: () => void;
+  /** Total time on screen before onFinish (ms) */
   duration?: number;
 }
 
-export function SplashScreen({ onFinish, duration = 1800 }: SplashScreenProps) {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.7)).current; // Start smaller for pop effect
+export function SplashScreen({ onFinish, onPainted, duration = 2400 }: SplashScreenProps) {
+  const paintedRef = useRef(false);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  const handleLayout = (_e: LayoutChangeEvent) => {
+    if (paintedRef.current) return;
+    paintedRef.current = true;
+    onPainted?.();
+  };
 
   useEffect(() => {
-    // Premium logo reveal: Fade in with a springy scale-up
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 6,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.04,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const pulseDelay = setTimeout(() => pulse.start(), 400);
 
-    // Auto dismiss after duration
-    const timer = setTimeout(() => {
-      if (onFinish) {
-        onFinish();
-      }
-    }, duration);
+    const end = setTimeout(() => onFinish?.(), duration);
 
-    return () => clearTimeout(timer);
-  }, [fadeAnim, scaleAnim, duration, onFinish]);
+    return () => {
+      clearTimeout(pulseDelay);
+      clearTimeout(end);
+      pulse.stop();
+    };
+  }, [duration, pulseAnim, onFinish]);
 
   return (
     <LinearGradient
-      colors={['#e3f2fd', '#ffffff', '#e1f5fe']}
+      colors={['#dbeafe', '#e3f2fd', '#ffffff', '#e1f5fe']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      locations={[0, 0.5, 1]}
-      style={styles.container}>
-      <Animated.View
-        style={{
-          opacity: fadeAnim,
-          transform: [{ scale: scaleAnim }],
-        }}>
+      locations={[0, 0.28, 0.58, 1]}
+      style={styles.container}
+      onLayout={handleLayout}>
+      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
         <Image
           source={HeaderLogo}
           style={styles.logo}
@@ -69,7 +76,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logo: {
-    width: 200,
-    height: 100,
+    width: 220,
+    height: 110,
   },
 });

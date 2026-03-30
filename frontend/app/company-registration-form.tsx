@@ -174,6 +174,11 @@ async function uriToBase64(uri: string | null): Promise<string | null> {
       }
     }
 
+    const info = await FileSystem.getInfoAsync(localUri);
+    if ('size' in info && typeof info.size === 'number' && info.size > 8 * 1024 * 1024) {
+      throw new Error('Selected file is too large. Please choose a file smaller than 8 MB.');
+    }
+
     const b64 = await FileSystem.readAsStringAsync(localUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
@@ -186,6 +191,9 @@ async function uriToBase64(uri: string | null): Promise<string | null> {
     return b64 ? `data:${mime};base64,${b64}` : null;
   } catch (err) {
     console.error('[uriToBase64] failed:', err);
+    if (err instanceof Error && err.message.includes('too large')) {
+      Alert.alert('File too large', err.message);
+    }
     if (tempDest) FileSystem.deleteAsync(tempDest, { idempotent: true }).catch(() => {});
     return null;
   }
@@ -222,6 +230,7 @@ export default function CompanyRegistrationFormScreen() {
   const uploadTargetRef = useRef<UploadTarget>(null);
   const pendingPickTypeRef = useRef<PickType | null>(null);
   const isPickingRef = useRef(false);
+  const androidPickerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [confirmedDisclaimer, setConfirmedDisclaimer] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -253,18 +262,7 @@ export default function CompanyRegistrationFormScreen() {
     setUploadModalVisible(true);
   }, []);
 
-  const handleUploadOption = useCallback((pickType: PickType) => {
-    if (!uploadTargetRef.current || isPickingRef.current) return;
-    pendingPickTypeRef.current = pickType;
-    setUploadModalVisible(false);
-    // onDismiss fires after animation completes → launches picker (see handleModalDismiss)
-  }, []);
-
-  // FIX #4: Use onDismiss instead of setTimeout.
-  // onDismiss fires precisely when the modal animation is done and the Activity
-  // is fully foregrounded. setTimeout is unreliable on slow Android devices —
-  // too short = black screen, too long = noticeable lag.
-  const handleModalDismiss = useCallback(async () => {
+  const launchPendingPicker = useCallback(async () => {
     const pickType = pendingPickTypeRef.current;
     const target = uploadTargetRef.current;
     pendingPickTypeRef.current = null;
@@ -294,6 +292,29 @@ export default function CompanyRegistrationFormScreen() {
       isPickingRef.current = false;
     }
   }, []);
+
+  const handleUploadOption = useCallback((pickType: PickType) => {
+    if (!uploadTargetRef.current || isPickingRef.current) return;
+    pendingPickTypeRef.current = pickType;
+    setUploadModalVisible(false);
+
+    // Android APK fix: Modal.onDismiss is not reliable. Launch picker after modal closes.
+    if (Platform.OS === 'android') {
+      if (androidPickerTimerRef.current) {
+        clearTimeout(androidPickerTimerRef.current);
+      }
+      androidPickerTimerRef.current = setTimeout(() => {
+        androidPickerTimerRef.current = null;
+        void launchPendingPicker();
+      }, 120);
+    }
+  }, [launchPendingPicker]);
+
+  const handleModalDismiss = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      void launchPendingPicker();
+    }
+  }, [launchPendingPicker]);
 
   const addDirector = useCallback(() => {
     setDirectors((prev) => [
@@ -359,6 +380,14 @@ export default function CompanyRegistrationFormScreen() {
 
   useEffect(() => {
     // Proactive permissions handled within pickers themselves for APK stability
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (androidPickerTimerRef.current) {
+        clearTimeout(androidPickerTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
