@@ -23,7 +23,8 @@ function normalizeEmail(email) {
 /** UI labels this as Gmail; enforce Gmail (or googlemail) domains for email/password auth. */
 function isGmailAddress(email) {
     const n = normalizeEmail(email);
-    return /\.(gmail|googlemail)\.com$/i.test(n);
+    // Must be actual email domain: ...@gmail.com or ...@googlemail.com
+    return /@(gmail|googlemail)\.com$/i.test(n);
 }
 
 function normalizeMobileDigits(mobile) {
