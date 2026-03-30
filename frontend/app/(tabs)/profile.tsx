@@ -300,7 +300,7 @@ export default function ProfileScreen() {
         <View style={styles.contactRow}>
           <Pressable
             style={styles.contactBtn}
-            onPress={() => Linking.openURL('tel:9153832945')}>
+            onPress={() => Linking.openURL('tel:+919153832948')}>
             <View style={styles.contactBtnIconWrap}>
               <Ionicons name="call" size={22} color={Colors.primary} />
             </View>
@@ -308,7 +308,7 @@ export default function ProfileScreen() {
           </Pressable>
           <Pressable
             style={styles.contactBtnWhatsapp}
-            onPress={() => Linking.openURL('https://wa.me/9153832945?text=Hi%2C%20I%20need%20more%20details%20about%20your%20services')}>
+            onPress={() => Linking.openURL('https://wa.me/919153832948?text=Hi%2C%20I%20need%20more%20details%20about%20your%20services')}>
             <View style={styles.contactBtnIconWrap}>
               <Ionicons name="logo-whatsapp" size={22} color={Colors.white} />
             </View>

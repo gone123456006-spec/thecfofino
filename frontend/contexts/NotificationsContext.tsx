@@ -21,12 +21,22 @@ export type NotificationItem = {
   read: boolean;
 };
 
+type AddNotificationInput = {
+  title: string;
+  body: string;
+  /** If true, notification is stored as already read (e.g. login/signup system messages). */
+  read?: boolean;
+  /** If set, marks an unread notification as read after this delay (message stays; not deleted). */
+  autoMarkReadAfterMs?: number;
+};
+
 type NotificationsContextValue = {
   items: NotificationItem[];
   unreadCount: number;
-  addNotification: (notification: Omit<NotificationItem, 'id' | 'time' | 'read'>) => void;
+  addNotification: (notification: AddNotificationInput) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
+  clearNotifications: () => void;
 };
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
@@ -88,6 +98,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     }
   }, []);
 
+  const clearNotifications = useCallback(() => {
+    setItems([]);
+    void AsyncStorage.removeItem(STORAGE_KEY);
+  }, []);
+
   const syncFromServer = useCallback(
     async (tkn: string) => {
       const res = await fetch(`${getApiBase()}/notifications/my`, {
@@ -120,9 +135,20 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         }))
         .filter((n: NotificationItem) => Boolean(n.id));
 
-      await persist(normalized);
+      // Keep client-only items (e.g. login/signup) so server poll does not wipe them.
+      setItems((prev) => {
+        const serverIds = new Set(normalized.map((n) => n.id));
+        const localOnly = prev.filter((n) => n.id.startsWith('n-') && !serverIds.has(n.id));
+        const merged = [...normalized, ...localOnly].sort((a, b) => {
+          const ta = Date.parse(a.time) || 0;
+          const tb = Date.parse(b.time) || 0;
+          return tb - ta;
+        });
+        void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        return merged;
+      });
     },
-    [persist],
+    [],
   );
 
   useEffect(() => {
@@ -151,18 +177,36 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, [token, syncFromServer]);
 
   const addNotification = useCallback(
-    (notification: Omit<NotificationItem, 'id' | 'time' | 'read'>) => {
+    (notification: AddNotificationInput) => {
       const newItem: NotificationItem = {
-        ...notification,
+        title: notification.title,
+        body: notification.body,
         id: `n-${Date.now()}`,
         time: new Date().toISOString(),
-        read: false,
+        read: Boolean(notification.read),
       };
       setItems((prev) => {
         const next = [newItem, ...prev];
         void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         return next;
       });
+
+      // Optional: auto mark as read after delay — keeps message, only clears unread state.
+      if (
+        !newItem.read &&
+        typeof notification.autoMarkReadAfterMs === 'number' &&
+        notification.autoMarkReadAfterMs > 0
+      ) {
+        const readId = newItem.id;
+        const delay = notification.autoMarkReadAfterMs;
+        setTimeout(() => {
+          setItems((prev) => {
+            const next = prev.map((n) => (n.id === readId ? { ...n, read: true } : n));
+            void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            return next;
+          });
+        }, delay);
+      }
     },
     [],
   );
@@ -174,6 +218,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       void (async () => {
         try {
+          // Client-only IDs (login/signup toasts): never call API or re-sync (would drop local items).
+          if (id.startsWith('n-')) {
+            const raw = await AsyncStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw) as NotificationItem[];
+            const next = parsed.map((n) => (n.id === id ? { ...n, read: true } : n));
+            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+            return;
+          }
+
           if (token) {
             await fetch(`${getApiBase()}/notifications/my/mark-read`, {
               method: 'PATCH',
@@ -238,6 +292,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     addNotification,
     markAsRead,
     markAllAsRead,
+    clearNotifications,
   };
 
   return (

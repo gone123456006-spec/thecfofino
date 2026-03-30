@@ -27,6 +27,17 @@ function getApiBase(): string {
   return 'https://finovert-backend.onrender.com/api';
 }
 
+async function fetchWithTimeout(input: RequestInfo, init: RequestInit & { timeoutMs?: number } = {}) {
+  const { timeoutMs = 25000, ...rest } = init;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...rest, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 type User = {
   name: string;
   mobile: string;
@@ -57,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [hasSeenWelcome, setHasSeenWelcomeState] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const { addNotification } = useNotifications();
+  const { addNotification, clearNotifications } = useNotifications();
 
   const loadStoredAuth = useCallback(async () => {
     try {
@@ -264,7 +275,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         let res: Response;
         try {
-          res = await fetch(`${getApiBase()}/auth/signup`, {
+          res = await fetchWithTimeout(`${getApiBase()}/auth/signup`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -274,8 +285,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               password,
               firebaseUid,
             }),
+            timeoutMs: 25000,
           });
         } catch (e) {
+          if ((e as any)?.name === 'AbortError') throw new Error('Server is taking too long. Please try again.');
           handleNetworkError(e);
         }
 
@@ -305,6 +318,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         addNotification({
           title: 'Welcome to Finovert!',
           body: `Congratulations ${trimmedName}! Your account has been created successfully.`,
+          read: true,
         });
       } catch (e: unknown) {
         if (firebaseCred?.user) {
@@ -358,6 +372,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         addNotification({
           title: 'Login Successful',
           body: 'Welcome back! You have successfully signed in.',
+          read: true,
         });
       } catch (e: any) {
         console.error('AuthContext: loginWithEmail error:', e);
@@ -381,12 +396,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (idToken: string) => {
       let res: Response;
       try {
-        res = await fetch(`${getApiBase()}/auth/firebase`, {
+        res = await fetchWithTimeout(`${getApiBase()}/auth/firebase`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ idToken }),
+          timeoutMs: 25000,
         });
       } catch (e) {
+        if ((e as any)?.name === 'AbortError') throw new Error('Server is taking too long. Please try again.');
         handleNetworkError(e);
       }
       const text = await (res!).text();
@@ -411,6 +428,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     setUser(null);
+    clearNotifications();
     await Promise.all([
       AsyncStorage.removeItem(AUTH_KEY),
       AsyncStorage.removeItem(TOKEN_KEY),
