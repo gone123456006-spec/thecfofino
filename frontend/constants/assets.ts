@@ -1,6 +1,3 @@
-/** Native + in-app splash center image (circular brand mark). */
-export const SplashIcon = require('../assets/images/Circle.png');
-
 /** Header / login logo (Finovert). */
 export const HeaderLogo = require('../assets/images/header-logo.png');
 

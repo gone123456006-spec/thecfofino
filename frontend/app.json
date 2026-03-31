@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "splash": {
       "image": "./assets/images/Circle.png",
-      "resizeMode": "cover",
+      "resizeMode": "contain",
       "backgroundColor": "#e3f2fd"
     },
     "scheme": "finovert",
@@ -49,8 +49,8 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/Circle.png",
-          "imageWidth": 600,
-          "resizeMode": "cover",
+          "imageWidth": 260,
+          "resizeMode": "contain",
           "backgroundColor": "#e3f2fd",
           "dark": {
             "image": "./assets/images/Circle.png",
