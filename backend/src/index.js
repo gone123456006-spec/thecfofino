@@ -1,6 +1,7 @@
 const config = require('./config'); // loads dotenv internally
 const express = require('express');
 const mongoose = require('mongoose');
+const path = require('path');
 
 const authRoutes = require('./routes/auth');
 const userAuthRoutes = require('./routes/user-auth');
@@ -45,6 +46,21 @@ app.use('/dashboard', express.static(__dirname + '/../dashboard'));
 // ─── Health Check ──────────────────────────────────────────────────
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true, server: 'Finovert Admin API', time: new Date().toISOString() });
+});
+
+// ─── Public branding (Razorpay checkout `image` must be an HTTPS/HTTP URL) ─
+app.get('/api/branding/finovert-logo.png', (_req, res) => {
+    const logoPath = path.join(__dirname, '../../frontend/assets/images/logogogw.png');
+    res.type('image/png');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(logoPath, (err) => {
+        if (err) {
+            console.warn('[branding] finovert logo:', err.message);
+            if (!res.headersSent) {
+                res.status(404).type('json').json({ ok: false, error: 'Logo asset not found on server.' });
+            }
+        }
+    });
 });
 
 // ─── Routes ───────────────────────────────────────────────────────

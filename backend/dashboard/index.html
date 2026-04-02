@@ -79,6 +79,10 @@
           <i class="fa-solid fa-mobile-screen"></i> App Users
           <span id="nav-users-badge" class="nav-badge hidden"></span>
         </a>
+        <div class="nav-section-label">Payments</div>
+        <a class="nav-item" data-tab="payment-settings" onclick="switchTab('payment-settings')">
+          <i class="fa-brands fa-cc-mastercard"></i> Razorpay · App fee
+        </a>
       </nav>
 
       <div class="sidebar-footer">
@@ -266,6 +270,39 @@
         </div>
       </div>
 
+      <!-- ═══ TAB: PAYMENT / RAZORPAY (APP CHECKOUT) ═══ -->
+      <div id="tab-payment-settings" class="tab-content hidden">
+        <div class="card" style="max-width: 640px;">
+          <div class="card-header">
+            <h3><i class="fa-solid fa-bolt"></i> Company registration — Razorpay checkout</h3>
+            <p style="margin:0;font-size:13px;color:var(--text3);font-weight:400;">
+              Amount shown in the mobile app and charged via <code>/api/payments/create-order</code> when purpose is
+              <code>company_registration</code>. Uses live Razorpay keys from server <code>.env</code>.
+            </p>
+          </div>
+          <div class="modal-body" style="padding-top:0;">
+            <div class="form-group">
+              <label>Amount (INR) — minimum ₹1</label>
+              <input type="number" id="rzp-app-amount" class="filter-select" style="width:100%" min="1" step="1"
+                placeholder="1" />
+            </div>
+            <div class="form-group">
+              <label>Product title (Razorpay checkout)</label>
+              <input type="text" id="rzp-app-title" class="filter-select" style="width:100%"
+                placeholder="Company Registration — Filing Fee" />
+            </div>
+            <div class="form-group">
+              <label>Description (app + checkout)</label>
+              <textarea id="rzp-app-desc" class="modal-textarea" style="min-height:72px;"
+                placeholder="Short line shown under the amount in the app…"></textarea>
+            </div>
+            <p id="rzp-app-status" style="font-size:12px;color:var(--text3);margin-bottom:12px;"></p>
+            <button class="btn btn-primary" onclick="saveRazorpayAppSettings()"><i class="fa-solid fa-floppy-disk"></i>
+              Save</button>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -338,6 +375,7 @@
             <option value="NEFT">NEFT</option>
             <option value="Cash">Cash</option>
             <option value="Card">Card</option>
+            <option value="Razorpay">Razorpay</option>
             <option value="Cheque">Cheque</option>
           </select>
         </div>

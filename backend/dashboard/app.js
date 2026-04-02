@@ -305,6 +305,7 @@ const TAB_TITLES = {
   bookings: 'Call Bookings',
   customers: 'All Customers',
   appusers: 'App Users',
+  'payment-settings': 'Razorpay · App fee',
 };
 
 function switchTab(tab) {
@@ -319,6 +320,7 @@ function switchTab(tab) {
   if (tab === 'bookings') loadBookings();
   if (tab === 'customers') loadCustomers();
   if (tab === 'appusers') loadAppUsers();
+  if (tab === 'payment-settings') loadRazorpayAppSettings();
 }
 
 function refreshCurrentTab() {
@@ -803,6 +805,51 @@ async function openPaymentModal(id) {
   }
 
   openModal('payment-modal');
+}
+
+// ─── RAZORPAY APP CHECKOUT SETTINGS (dashboard-managed amount) ─────────────
+
+async function loadRazorpayAppSettings() {
+  const statusEl = document.getElementById('rzp-app-status');
+  if (!statusEl) return;
+  statusEl.textContent = 'Loading…';
+  try {
+    const res = await fetch(API + '/payments/public-config');
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Failed to load');
+    document.getElementById('rzp-app-amount').value = d.companyRegistrationRazorpayAmountINR ?? 1;
+    document.getElementById('rzp-app-title').value = d.companyRegistrationProductTitle || '';
+    document.getElementById('rzp-app-desc').value = d.companyRegistrationProductDescription || '';
+    statusEl.textContent = d.razorpayConfigured
+      ? 'Razorpay is configured on the server (keys present).'
+      : 'Warning: RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET may be missing in server .env — app checkout will fail.';
+  } catch (err) {
+    statusEl.textContent = 'Could not load settings: ' + err.message;
+  }
+}
+
+async function saveRazorpayAppSettings() {
+  const companyRegistrationRazorpayAmountINR = Number(document.getElementById('rzp-app-amount').value);
+  const companyRegistrationProductTitle = document.getElementById('rzp-app-title').value.trim();
+  const companyRegistrationProductDescription = document.getElementById('rzp-app-desc').value.trim();
+  if (!Number.isFinite(companyRegistrationRazorpayAmountINR) || companyRegistrationRazorpayAmountINR < 1) {
+    showToast('Amount must be at least ₹1.', 'error');
+    return;
+  }
+  try {
+    await apiFetch('/payments/admin-settings', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        companyRegistrationRazorpayAmountINR,
+        companyRegistrationProductTitle,
+        companyRegistrationProductDescription,
+      }),
+    });
+    showToast('Razorpay app checkout settings saved.', 'success');
+    loadRazorpayAppSettings();
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
 }
 
 async function submitPaymentUpdate() {

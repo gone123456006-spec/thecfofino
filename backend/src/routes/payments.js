@@ -1,6 +1,12 @@
 const express = require('express');
 const crypto = require('crypto');
 const Razorpay = require('razorpay');
+const mongoose = require('mongoose');
+
+const auth = require('../middleware/auth');
+const userAuth = require('../middleware/userAuth');
+const CompanyRegistration = require('../models/CompanyRegistration');
+const { getAppSettings } = require('../services/appSettings');
 
 const router = express.Router();
 
@@ -53,6 +59,137 @@ function isValidCurrency(currency) {
     return typeof currency === 'string' && /^[A-Z]{3}$/.test(currency);
 }
 
+function verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature) {
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    if (!keySecret) return { ok: false, error: 'Payment gateway not configured.' };
+    const body = razorpay_order_id + '|' + razorpay_payment_id;
+    const expected = crypto.createHmac('sha256', keySecret).update(body).digest('hex');
+    const expectedBuffer = Buffer.from(expected, 'hex');
+    const receivedBuffer = Buffer.from(razorpay_signature, 'hex');
+    try {
+        if (
+            expectedBuffer.length === receivedBuffer.length &&
+            crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+        ) {
+            return { ok: true };
+        }
+    } catch {
+        /* length mismatch */
+    }
+    return { ok: false, error: 'Invalid signature.' };
+}
+
+// ─── GET /api/payments/public-config (mobile app — no auth) ─────────────────
+router.get('/public-config', async (req, res) => {
+    try {
+        const settings = await getAppSettings();
+        const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https')
+            .split(',')[0]
+            .trim();
+        const host = req.get('host') || '';
+        const checkoutLogoUrl = host ? `${proto}://${host}/api/branding/finovert-logo.png` : '';
+        return res.json({
+            ok: true,
+            companyRegistrationAmountINR: settings.companyRegistrationRazorpayAmountINR,
+            productTitle: settings.companyRegistrationProductTitle,
+            productDescription: settings.companyRegistrationProductDescription,
+            currency: 'INR',
+            razorpayConfigured: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+            checkoutLogoUrl,
+        });
+    } catch (err) {
+        console.error('[public-config]', err);
+        return res.status(500).json({ ok: false, error: 'Failed to load payment settings.' });
+    }
+});
+
+// ─── PATCH /api/payments/admin-settings (dashboard — admin JWT) ────────────
+router.patch('/admin-settings', auth, async (req, res) => {
+    try {
+        const {
+            companyRegistrationRazorpayAmountINR,
+            companyRegistrationProductTitle,
+            companyRegistrationProductDescription,
+        } = req.body || {};
+
+        const settings = await getAppSettings();
+
+        if (companyRegistrationRazorpayAmountINR !== undefined && companyRegistrationRazorpayAmountINR !== null) {
+            const n = Number(companyRegistrationRazorpayAmountINR);
+            if (!Number.isFinite(n) || n < 1) {
+                return res.status(400).json({ ok: false, error: 'Amount must be at least ₹1.' });
+            }
+            settings.companyRegistrationRazorpayAmountINR = n;
+        }
+        if (typeof companyRegistrationProductTitle === 'string' && companyRegistrationProductTitle.trim()) {
+            settings.companyRegistrationProductTitle = companyRegistrationProductTitle.trim().slice(0, 120);
+        }
+        if (typeof companyRegistrationProductDescription === 'string' && companyRegistrationProductDescription.trim()) {
+            settings.companyRegistrationProductDescription = companyRegistrationProductDescription.trim().slice(0, 500);
+        }
+        await settings.save();
+        return res.json({
+            ok: true,
+            companyRegistrationRazorpayAmountINR: settings.companyRegistrationRazorpayAmountINR,
+            companyRegistrationProductTitle: settings.companyRegistrationProductTitle,
+            companyRegistrationProductDescription: settings.companyRegistrationProductDescription,
+        });
+    } catch (err) {
+        console.error('[admin-settings]', err);
+        return res.status(500).json({ ok: false, error: 'Failed to update settings.' });
+    }
+});
+
+// ─── POST /api/payments/complete-company-registration (app user JWT) ──────
+router.post('/complete-company-registration', userAuth, async (req, res) => {
+    try {
+        const { registrationId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+
+        if (!registrationId || !mongoose.Types.ObjectId.isValid(String(registrationId))) {
+            return res.status(400).json({ ok: false, error: 'Invalid registration id.' });
+        }
+        if (
+            !razorpay_order_id || typeof razorpay_order_id !== 'string' ||
+            !razorpay_payment_id || typeof razorpay_payment_id !== 'string' ||
+            !razorpay_signature || typeof razorpay_signature !== 'string'
+        ) {
+            return res.status(400).json({ ok: false, error: 'Missing payment verification fields.' });
+        }
+
+        const check = verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+        if (!check.ok) {
+            return res.status(400).json({ ok: false, error: check.error || 'Verification failed.' });
+        }
+
+        const reg = await CompanyRegistration.findById(registrationId);
+        if (!reg) {
+            return res.status(404).json({ ok: false, error: 'Registration not found.' });
+        }
+        const uid = reg.userId ? String(reg.userId) : null;
+        if (!uid || uid !== String(req.userId)) {
+            return res.status(403).json({ ok: false, error: 'Not allowed for this registration.' });
+        }
+
+        const appSettings = await getAppSettings();
+        reg.paymentStatus = 'paid';
+        reg.paymentAmount = appSettings.companyRegistrationRazorpayAmountINR;
+        reg.paymentMethod = 'razorpay';
+        reg.paymentReference = razorpay_payment_id;
+        reg.paidAt = new Date();
+        await reg.save();
+
+        return res.json({
+            ok: true,
+            paymentId: razorpay_payment_id,
+            orderId: razorpay_order_id,
+            paymentAmount: reg.paymentAmount,
+        });
+    } catch (err) {
+        console.error('[complete-company-registration]', err);
+        return res.status(500).json({ ok: false, error: 'Failed to record payment.' });
+    }
+});
+
 // ─── POST /api/payments/create-order ─────────────────────────────────────────
 /**
  * Create a Razorpay order.
@@ -72,11 +209,30 @@ router.post('/create-order', async (req, res) => {
             });
         }
 
-        const {
-            amount = 7498,          // default ₹7,498 in INR
-            currency = 'INR',
-            receipt = 'receipt_' + Date.now(),
-        } = req.body;
+        const body = req.body || {};
+        const purpose = typeof body.purpose === 'string' ? body.purpose : '';
+        const currency = typeof body.currency === 'string' ? body.currency : 'INR';
+        let receipt = body.receipt != null ? String(body.receipt) : 'receipt_' + Date.now();
+
+        let amount;
+        if (purpose === 'company_registration') {
+            const settings = await getAppSettings();
+            amount = settings.companyRegistrationRazorpayAmountINR;
+            // Legacy dashboard value → normalize to ₹1 (current product default)
+            if (amount === 7498) {
+                amount = 1;
+                settings.companyRegistrationRazorpayAmountINR = 1;
+                await settings.save();
+            }
+            const envOverride = process.env.COMPANY_REGISTRATION_RAZORPAY_INR;
+            if (envOverride != null && String(envOverride).trim() !== '') {
+                const n = Number(envOverride);
+                if (Number.isFinite(n) && n >= 1) amount = n;
+            }
+            receipt = receipt.slice(0, 40);
+        } else {
+            amount = body.amount != null ? Number(body.amount) : 1;
+        }
 
         // Validate amount
         if (!isValidAmount(amount)) {
@@ -101,7 +257,7 @@ router.post('/create-order', async (req, res) => {
         const order = await instance.orders.create({
             amount: amountInPaise,
             currency,
-            receipt: String(receipt).slice(0, 40), // Razorpay receipt max length is 40
+            receipt: String(receipt).slice(0, 40),
             payment_capture: 1,
         });
 
@@ -153,34 +309,11 @@ router.post('/verify', (req, res) => {
             return res.status(400).json({ ok: false, error: 'Missing or invalid payment fields.' });
         }
 
-        const keySecret = process.env.RAZORPAY_KEY_SECRET;
-        if (!keySecret) {
-            console.error('[verify] RAZORPAY_KEY_SECRET is not set');
-            return res.status(503).json({ ok: false, error: 'Payment gateway not configured.' });
-        }
-
-        // Razorpay signature = HMAC-SHA256(order_id + "|" + payment_id, key_secret)
-        const body = razorpay_order_id + '|' + razorpay_payment_id;
-        const expected = crypto
-            .createHmac('sha256', keySecret)
-            .update(body)
-            .digest('hex');
-
-        // Use timingSafeEqual to prevent timing attacks
-        const expectedBuffer = Buffer.from(expected, 'hex');
-        const receivedBuffer = Buffer.from(razorpay_signature, 'hex');
-
-        let isValid = false;
-        try {
-            isValid = (
-                expectedBuffer.length === receivedBuffer.length &&
-                crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
-            );
-        } catch {
-            isValid = false;
-        }
-
-        if (!isValid) {
+        const check = verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
+        if (!check.ok) {
+            if (check.error === 'Payment gateway not configured.') {
+                return res.status(503).json({ ok: false, error: check.error });
+            }
             console.warn('[verify] Signature mismatch for order:', razorpay_order_id);
             return res.status(400).json({ ok: false, error: 'Payment verification failed. Invalid signature.' });
         }
