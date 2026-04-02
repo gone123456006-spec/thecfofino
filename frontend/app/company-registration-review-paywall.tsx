@@ -244,7 +244,7 @@ export default function CompanyRegistrationReviewPaywallScreen() {
     if (payload.success) {
       // Close modal first for better UX
       setRazorpayModalVisible(false);
-      setPaying(true);
+    setPaying(true);
 
       try {
         // 3. Verify payment signature on backend
@@ -262,23 +262,23 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         if (!vData.ok) throw new Error(vData.error ?? 'Signature verification failed');
 
         // 4. Mark as paid and navigate
-        await saveCompanyRegistrationState({
-          status: 'paid',
-          paymentStatus: 'paid',
+    await saveCompanyRegistrationState({
+      status: 'paid',
+      paymentStatus: 'paid',
           paymentMethod: 'upi',
-          paidAt: new Date().toISOString(),
-        });
-        addNotification({
-          title: 'Payment Successful',
-          body: 'Payment received. Upload and filing process is now unlocked.',
-        });
-        setIsPaid(true);
+      paidAt: new Date().toISOString(),
+    });
+    addNotification({
+      title: 'Payment Successful',
+      body: 'Payment received. Upload and filing process is now unlocked.',
+    });
+    setIsPaid(true);
         router.push('/company-registration-upload-tracking');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Verification failed';
         Alert.alert('Payment Verification Failed', msg);
       } finally {
-        setPaying(false);
+    setPaying(false);
       }
     } else {
       // Cancelled or failed
@@ -380,8 +380,8 @@ export default function CompanyRegistrationReviewPaywallScreen() {
           <Text style={s.headerTitle}>Review & Pay</Text>
           <Text style={s.headerSub}>Verify your details below. Tap{' '}
             <Ionicons name="pencil" size={12} color="#6366f1" /> to edit any field before paying.
-          </Text>
-        </View>
+              </Text>
+            </View>
 
         {/* ── Summary Table ── */}
         {draft ? (
@@ -448,9 +448,9 @@ export default function CompanyRegistrationReviewPaywallScreen() {
               <Text style={s.uploadStatusText}>PAN: {dir.panFileUri ? 'Uploaded' : 'Missing'}</Text>
               <View style={[s.uploadDot, (dir.aadhaarFrontFileUri && dir.aadhaarBackFileUri) ? s.uploadDotGreen : s.uploadDotRed, { marginLeft: 16 }]} />
               <Text style={s.uploadStatusText}>Aadhaar: {(dir.aadhaarFrontFileUri && dir.aadhaarBackFileUri) ? 'Uploaded' : 'Missing Front/Back'}</Text>
-            </View>
-          </View>
-        ))}
+                </View>
+              </View>
+            ))}
 
         {!draft && (
           <View style={s.card}>
@@ -470,11 +470,11 @@ export default function CompanyRegistrationReviewPaywallScreen() {
             <TableRow label="Professional Fees" value="₹4,999" onEdit={() => { }} isLocked />
             <TableRow label="Government Fees" value="₹2,000" onEdit={() => { }} isLocked />
             <TableRow label="Convenience Charges" value="₹499" onEdit={() => { }} isLocked />
-          </View>
+      </View>
           <View style={s.totalRow}>
             <Text style={s.totalLabel}>Total Amount</Text>
             <Text style={s.totalValue}>₹{totalCost.toLocaleString('en-IN')}</Text>
-          </View>
+        </View>
         </View>
 
         {/* ── Timeline & Policy ── */}
@@ -482,19 +482,19 @@ export default function CompanyRegistrationReviewPaywallScreen() {
           <View style={s.cardHeader}>
             <Ionicons name="time-outline" size={18} color="#6366f1" />
             <Text style={s.cardTitle}>Timeline & Policy</Text>
-          </View>
+        </View>
           <View style={s.infoRow}>
             <Ionicons name="calendar-outline" size={16} color="#6366f1" />
             <Text style={s.infoText}>7–15 working days (subject to document verification)</Text>
-          </View>
+        </View>
           <View style={s.infoRow}>
             <Ionicons name="checkmark-circle-outline" size={16} color="#22c55e" />
             <Text style={s.infoText}>Refund not applicable after filing is initiated.</Text>
-          </View>
+      </View>
           <View style={s.infoRow}>
             <Ionicons name="checkmark-circle-outline" size={16} color="#22c55e" />
             <Text style={s.infoText}>Partial refund may apply if filing is not yet initiated.</Text>
-          </View>
+      </View>
         </View>
 
         {/* ── Locked Features ── */}
@@ -508,9 +508,9 @@ export default function CompanyRegistrationReviewPaywallScreen() {
               <View key={item} style={s.lockedChip}>
                 <Ionicons name="lock-closed-outline" size={13} color="#b45309" />
                 <Text style={s.lockedChipText}>{item}</Text>
-              </View>
+        </View>
             ))}
-          </View>
+      </View>
         </View>
 
         {/* ── Razorpay CTA ── */}
@@ -529,36 +529,36 @@ export default function CompanyRegistrationReviewPaywallScreen() {
                 <Text style={s.rzpMethodText}>{m}</Text>
               </View>
             ))}
-          </View>
+      </View>
           <View style={s.rzpBadgeRow}>
             <View style={s.rzpBadge}>
               <Ionicons name="lock-closed" size={11} color="#6366f1" />
               <Text style={s.rzpBadgeText}>Secured by Razorpay</Text>
-            </View>
-          </View>
         </View>
+        </View>
+      </View>
 
         {/* ── Pay CTA ── */}
-        <Pressable
+      <Pressable
           style={[s.payBtn, paying && s.payBtnDisabled]}
-          onPress={handlePayAndInitiate}
+        onPress={handlePayAndInitiate}
           disabled={paying}>
-          {paying ? (
+        {paying ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <>
               <Ionicons name={isPaid ? 'checkmark-circle' : 'lock-open-outline'} size={20} color="#fff" />
               <Text style={s.payBtnText}>
                 {isPaid ? 'Payment Done — Continue' : `Pay ₹${totalCost.toLocaleString('en-IN')} & Initiate Filing`}
-              </Text>
+          </Text>
             </>
-          )}
-        </Pressable>
+        )}
+      </Pressable>
 
         <Text style={s.secureNote}>
           <Ionicons name="shield-checkmark-outline" size={12} color="#6b7280" /> 256-bit SSL encrypted & secure · Powered by Razorpay
         </Text>
-      </ScrollView>
+    </ScrollView>
     </>
   );
 }

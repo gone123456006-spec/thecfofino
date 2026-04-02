@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "splash": {
-      "image": "./assets/images/Circle.png",
+      "image": "./assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#e3f2fd"
     },
@@ -48,12 +48,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/Circle.png",
-          "imageWidth": 260,
+          "image": "./assets/images/splash.png",
+          "imageWidth": 300,
           "resizeMode": "contain",
           "backgroundColor": "#e3f2fd",
           "dark": {
-            "image": "./assets/images/Circle.png",
+            "image": "./assets/images/splash.png",
             "backgroundColor": "#0a1628"
           }
         }
