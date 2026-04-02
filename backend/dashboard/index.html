@@ -406,6 +406,20 @@
           <label>Message</label>
           <textarea id="notification-modal-body" class="modal-textarea" placeholder="Type your message..." style="min-height:90px"></textarea>
         </div>
+        <div class="form-group">
+          <label>Show in app only after step (company registration)</label>
+          <select id="notification-modal-min-step" class="filter-select" style="width:100%">
+            <option value="">Always — any signed-in user</option>
+            <option value="0">0 — Documents submitted (paid)</option>
+            <option value="1">1 — Application submitted</option>
+            <option value="2">2 — Process initiated</option>
+            <option value="3">3 — Filed with MCA</option>
+            <option value="4">4 — Approved</option>
+          </select>
+          <small style="display:block;margin-top:6px;color:var(--muted);font-size:12px;line-height:1.4;">
+            The user will not see this notification in the app until their latest registration reaches this step.
+          </small>
+        </div>
         <button class="btn btn-primary" onclick="submitNotificationToUser()">
           <i class="fa-solid fa-paper-plane"></i> Send
         </button>

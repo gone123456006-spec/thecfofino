@@ -89,6 +89,8 @@ function openNotificationModal(userId) {
   document.getElementById('notification-modal-user-id').value = userId;
   document.getElementById('notification-modal-title').value = '';
   document.getElementById('notification-modal-body').value = '';
+  const stepEl = document.getElementById('notification-modal-min-step');
+  if (stepEl) stepEl.value = '';
   openModal('notification-modal');
 }
 
@@ -102,9 +104,14 @@ async function submitNotificationToUser() {
   if (!body) return showToast('Please enter a message.', 'error');
 
   try {
+    const stepEl = document.getElementById('notification-modal-min-step');
+    const minStepRaw = stepEl && stepEl.value !== '' ? stepEl.value : undefined;
+    const payload = { userId, title, body };
+    if (minStepRaw !== undefined) payload.minStepIndex = Number(minStepRaw);
+
     await apiFetch('/notifications/admin/send', {
       method: 'POST',
-      body: JSON.stringify({ userId, title, body }),
+      body: JSON.stringify(payload),
     });
     closeModal('notification-modal');
     showToast('Notification sent to user.', 'success');

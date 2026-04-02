@@ -6,6 +6,11 @@ const NotificationSchema = new mongoose.Schema(
     title: { type: String, required: true },
     body: { type: String, required: true },
     read: { type: Boolean, default: false },
+    /**
+     * If set (0–4), the app only shows this notification once the user’s latest
+     * company registration has reached at least this tracker step. Null/omit = always visible.
+     */
+    minStepIndex: { type: Number, default: null },
   },
   {
     timestamps: true,

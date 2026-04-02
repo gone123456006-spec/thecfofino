@@ -4,9 +4,17 @@ const mongoose = require('mongoose');
 
 const Notification = require('../models/Notification');
 const User = require('../models/User');
+const CompanyRegistration = require('../models/CompanyRegistration');
 const auth = require('../middleware/auth'); // admin auth
 const userAuth = require('../middleware/userAuth'); // app user auth
-const config = require('../config');
+const { getUserMaxRegistrationStepIndex } = require('../utils/registrationSteps');
+
+function parseMinStepIndex(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 4) return null;
+  return n;
+}
 
 function toNotificationJSON(n) {
   return {
@@ -25,7 +33,7 @@ function toNotificationJSON(n) {
  */
 router.post('/admin/send', auth, async (req, res) => {
   try {
-    const { userId, title, body } = req.body || {};
+    const { userId, title, body, minStepIndex: minStepRaw } = req.body || {};
 
     if (!userId || !title || !body) {
       return res.status(400).json({ ok: false, error: 'userId, title, and body are required.' });
@@ -34,17 +42,25 @@ router.post('/admin/send', auth, async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Invalid userId.' });
     }
 
+    const minStepIndex = parseMinStepIndex(minStepRaw);
+    if (minStepRaw !== undefined && minStepRaw !== null && minStepRaw !== '' && minStepIndex === null) {
+      return res.status(400).json({ ok: false, error: 'minStepIndex must be an integer from 0 to 4, or omitted.' });
+    }
+
     const user = await User.findById(userId).select('_id');
     if (!user) {
       return res.status(404).json({ ok: false, error: 'User not found.' });
     }
 
-    const created = await Notification.create({
+    const payload = {
       userId,
       title: String(title).trim(),
       body: String(body).trim(),
       read: false,
-    });
+    };
+    if (minStepIndex !== null) payload.minStepIndex = minStepIndex;
+
+    const created = await Notification.create(payload);
 
     return res.status(201).json({ ok: true, notification: toNotificationJSON(created) });
   } catch (err) {
@@ -61,9 +77,19 @@ router.get('/my', userAuth, async (req, res) => {
   try {
     const list = await Notification.find({ userId: req.userId })
       .sort({ createdAt: -1 })
-      .limit(50)
+      .limit(80)
       .lean();
-    return res.json({ ok: true, notifications: list.map(toNotificationJSON) });
+
+    const userMax = await getUserMaxRegistrationStepIndex(req.userId, CompanyRegistration);
+    const visible = list.filter((n) => {
+      if (n.minStepIndex == null) return true;
+      return userMax >= n.minStepIndex;
+    });
+
+    return res.json({
+      ok: true,
+      notifications: visible.slice(0, 50).map(toNotificationJSON),
+    });
   } catch (err) {
     console.error('[notifications/my] error:', err);
     return res.status(500).json({ ok: false, error: err.message || 'Failed to load notifications.' });

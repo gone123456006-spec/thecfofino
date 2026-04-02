@@ -8,6 +8,13 @@ const User = require('../models/User');
 const auth = require('../middleware/auth'); // admin
 const userAuth = require('../middleware/userAuth'); // app user
 
+function parseMinStepIndex(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 4) return null;
+  return n;
+}
+
 function toChatMessageJSON(m) {
   return {
     id: m._id?.toString?.() ?? String(m._id),
@@ -34,12 +41,17 @@ function escapeHTML(str) {
  */
 router.post('/admin/send', auth, async (req, res) => {
   try {
-    const { userId, text } = req.body || {};
+    const { userId, text, minStepIndex: minStepRaw } = req.body || {};
     if (!userId || !text) {
       return res.status(400).json({ ok: false, error: 'userId and text are required.' });
     }
     if (!mongoose.isValidObjectId(userId)) {
       return res.status(400).json({ ok: false, error: 'Invalid userId.' });
+    }
+
+    const minStepIndex = parseMinStepIndex(minStepRaw);
+    if (minStepRaw !== undefined && minStepRaw !== null && minStepRaw !== '' && minStepIndex === null) {
+      return res.status(400).json({ ok: false, error: 'minStepIndex must be an integer from 0 to 4, or omitted.' });
     }
 
     const user = await User.findById(userId).select('_id');
@@ -51,13 +63,14 @@ router.post('/admin/send', auth, async (req, res) => {
       text: escapeHTML(String(text).trim()),
     });
 
-    // Also create an in-app notification so it appears in the user's Notifications screen.
-    await Notification.create({
+    const notifPayload = {
       userId,
       title: 'New message',
       body: String(text).trim(),
       read: false,
-    });
+    };
+    if (minStepIndex !== null) notifPayload.minStepIndex = minStepIndex;
+    await Notification.create(notifPayload);
 
     return res.status(201).json({ ok: true, message: toChatMessageJSON(created) });
   } catch (err) {
