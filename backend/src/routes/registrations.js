@@ -73,14 +73,27 @@ router.put('/:id', async (req, res) => {
 });
 
 // GET /api/registrations/my — current user's registrations (app user token required); returns latest for status sync
+// ?summary=1 — omit director blobs (lighter payload for payment history / lists); optional &limit= (default 10 full, 50 summary)
 router.get('/my', userAuth, async (req, res) => {
     try {
-        const list = await CompanyRegistration.find({ userId: req.userId })
+        const summary = req.query.summary === '1';
+        const cap = summary ? 50 : 10;
+        const limit = Math.min(Math.max(Number(req.query.limit) || cap, 1), 100);
+        let q = CompanyRegistration.find({ userId: req.userId })
             .sort({ createdAt: -1 })
             .allowDiskUse(true)
-            .limit(10)
-            .lean()
-            .select('status paymentStatus paymentAmount caseId proposedName1 createdAt businessType');
+            .limit(limit)
+            .lean();
+        if (summary) {
+            q = q.select(
+                'status paymentStatus paymentAmount caseId proposedName1 createdAt businessType paidAt paymentReference paymentMethod updatedAt',
+            );
+        } else {
+            q = q.select(
+                'status paymentStatus paymentAmount caseId proposedName1 createdAt businessType directors paidAt paymentReference paymentMethod updatedAt',
+            );
+        }
+        const list = await q;
         res.json({ ok: true, registrations: list });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

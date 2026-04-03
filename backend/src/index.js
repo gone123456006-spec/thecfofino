@@ -50,7 +50,7 @@ app.get('/api/health', (_req, res) => {
 
 // ─── Public branding (Razorpay checkout `image` must be an HTTPS/HTTP URL) ─
 app.get('/api/branding/finovert-logo.png', (_req, res) => {
-    const logoPath = path.join(__dirname, '../../frontend/assets/images/logogogw.png');
+    const logoPath = path.join(__dirname, '../../frontend/assets/images/logo-fino.png');
     res.type('image/png');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     res.sendFile(logoPath, (err) => {
