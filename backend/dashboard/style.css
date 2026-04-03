@@ -865,6 +865,23 @@ tbody td {
   background: rgba(52, 199, 89, 0.15);
 }
 
+.danger-zone-card {
+  margin-top: 24px;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.danger-zone-title {
+  color: var(--danger);
+  margin: 0;
+}
+
+.danger-zone-copy {
+  color: var(--text2);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
 .btn-danger {
   background: rgba(255, 59, 48, 0.08);
   color: var(--danger);

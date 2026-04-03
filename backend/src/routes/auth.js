@@ -1,6 +1,12 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
+const auth = require('../middleware/auth');
+const CompanyRegistration = require('../models/CompanyRegistration');
+const Booking = require('../models/Booking');
+const User = require('../models/User');
+const Notification = require('../models/Notification');
+const ChatMessage = require('../models/ChatMessage');
 
 const router = express.Router();
 
@@ -51,6 +57,39 @@ router.get('/verify', (req, res) => {
             return res.status(401).json({ error: 'Token has expired.' });
         }
         return res.status(401).json({ error: 'Invalid token.' });
+    }
+});
+
+/**
+ * POST /api/admin/wipe-all-data
+ * Admin JWT only. Deletes all app-user data: registrations, bookings, users,
+ * notifications, chat messages. Does not remove AppSettings (Razorpay fee / copy).
+ */
+router.post('/wipe-all-data', auth, async (req, res) => {
+    if (req.admin.role !== 'admin') {
+        return res.status(403).json({ ok: false, error: 'Forbidden.' });
+    }
+    try {
+        const [registrations, bookings, users, notifications, messages] = await Promise.all([
+            CompanyRegistration.deleteMany({}),
+            Booking.deleteMany({}),
+            User.deleteMany({}),
+            Notification.deleteMany({}),
+            ChatMessage.deleteMany({}),
+        ]);
+        return res.json({
+            ok: true,
+            deleted: {
+                registrations: registrations.deletedCount,
+                bookings: bookings.deletedCount,
+                users: users.deletedCount,
+                notifications: notifications.deletedCount,
+                messages: messages.deletedCount,
+            },
+        });
+    } catch (err) {
+        console.error('[admin/wipe-all-data]', err);
+        return res.status(500).json({ ok: false, error: err.message || 'Wipe failed.' });
     }
 });
 

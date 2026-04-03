@@ -41,7 +41,7 @@ export type CompanyRegistrationStatus =
   | 'upload_in_progress'
   | 'completed';
 
-export type CompanyRegistrationPaymentMethod = 'upi' | 'qr' | 'card' | null;
+export type CompanyRegistrationPaymentMethod = 'upi' | 'qr' | 'card' | 'razorpay' | null;
 
 export type CompanyRegistrationProcessState = {
   draft: CompanyRegistrationDraft | null;
@@ -127,6 +127,14 @@ export async function clearCompanyRegistrationState(): Promise<void> {
   currentDraft = null;
   currentState = defaultState;
   await AsyncStorage.removeItem(STORAGE_KEY);
+}
+
+/**
+ * After successful payment: clears the local form/wizard only.
+ * The paid registration stays on the server (dashboard + app status use `/registrations/my`).
+ */
+export async function resetLocalCompanyRegistrationAfterPaymentSuccess(): Promise<void> {
+  return clearCompanyRegistrationState();
 }
 
 export function setCompanyRegistrationDraft(draft: CompanyRegistrationDraft) {

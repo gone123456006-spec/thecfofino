@@ -21,13 +21,15 @@ export type NotificationItem = {
   read: boolean;
 };
 
-type AddNotificationInput = {
+export type AddNotificationInput = {
   title: string;
   body: string;
   /** If true, notification is stored as already read (e.g. login/signup system messages). */
   read?: boolean;
   /** If set, marks an unread notification as read after this delay (message stays; not deleted). */
   autoMarkReadAfterMs?: number;
+  /** Stable id for deduplication (e.g. auto tracking / payment reminders). */
+  id?: string;
 };
 
 type NotificationsContextValue = {
@@ -170,43 +172,58 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       void syncFromServer(token).catch(() => {});
     }, 10_000);
 
+    // If user logs out, TOKEN_KEY is removed — stop using stale JWT for polling.
+    const logoutWatch = setInterval(() => {
+      void (async () => {
+        try {
+          const t = await AsyncStorage.getItem(TOKEN_KEY);
+          if (!t) setToken(null);
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, 2000);
+
     return () => {
       mounted = false;
       clearInterval(id);
+      clearInterval(logoutWatch);
     };
   }, [token, syncFromServer]);
 
   const addNotification = useCallback(
     (notification: AddNotificationInput) => {
-      const newItem: NotificationItem = {
-        title: notification.title,
-        body: notification.body,
-        id: `n-${Date.now()}`,
-        time: new Date().toISOString(),
-        read: Boolean(notification.read),
-      };
+      const id = notification.id ?? `n-${Date.now()}`;
       setItems((prev) => {
+        if (prev.some((n) => n.id === id)) return prev;
+        const newItem: NotificationItem = {
+          title: notification.title,
+          body: notification.body,
+          id,
+          time: new Date().toISOString(),
+          read: Boolean(notification.read),
+        };
         const next = [newItem, ...prev];
         void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+
+        if (
+          !newItem.read &&
+          typeof notification.autoMarkReadAfterMs === 'number' &&
+          notification.autoMarkReadAfterMs > 0
+        ) {
+          const delay = notification.autoMarkReadAfterMs;
+          const readId = id;
+          setTimeout(() => {
+            setItems((p) => {
+              const merged = p.map((n) => (n.id === readId ? { ...n, read: true } : n));
+              void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+              return merged;
+            });
+          }, delay);
+        }
+
         return next;
       });
-
-      // Optional: auto mark as read after delay — keeps message, only clears unread state.
-      if (
-        !newItem.read &&
-        typeof notification.autoMarkReadAfterMs === 'number' &&
-        notification.autoMarkReadAfterMs > 0
-      ) {
-        const readId = newItem.id;
-        const delay = notification.autoMarkReadAfterMs;
-        setTimeout(() => {
-          setItems((prev) => {
-            const next = prev.map((n) => (n.id === readId ? { ...n, read: true } : n));
-            void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            return next;
-          });
-        }, delay);
-      }
     },
     [],
   );

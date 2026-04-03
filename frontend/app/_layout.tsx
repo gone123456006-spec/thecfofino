@@ -1,6 +1,7 @@
 import '@/lib/splash-hold';
 
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import * as SplashScreenNative from 'expo-splash-screen';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter } from 'expo-router';
@@ -48,10 +49,13 @@ function RootLayoutContent() {
   const hideNativeSplash = useCallback(async () => {
     if (nativeSplashHiddenRef.current) return;
     nativeSplashHiddenRef.current = true;
-    try {
-      SplashScreenNative.setOptions({ fade: true, duration: 280 });
-    } catch {
-      /* Expo Go or older native module */
+    // SplashScreen.setOptions is not supported in Expo Go (would log a warning).
+    if (Constants.appOwnership !== 'expo') {
+      try {
+        SplashScreenNative.setOptions({ fade: true, duration: 280 });
+      } catch {
+        /* older native module */
+      }
     }
     await SplashScreenNative.hideAsync();
   }, []);
@@ -196,9 +200,31 @@ function RootLayoutContent() {
           }}
         />
         <Stack.Screen
+          name="transactions"
+          options={{
+            title: 'Payment activity',
+            headerTitleAlign: 'left',
+            headerLeft: () => <NotificationsHeaderLeft />,
+            headerShadowVisible: false,
+            headerStyle: { backgroundColor: Colors.background },
+            headerTitleStyle: { fontWeight: '700', fontSize: ms(18), color: Colors.textPrimary },
+          }}
+        />
+        <Stack.Screen
           name="company-registration-upload-tracking"
           options={{
-            title: 'Upload & Tracking',
+            title: 'My filings',
+            headerTitleAlign: 'left',
+            headerLeft: () => <NotificationsHeaderLeft />,
+            headerShadowVisible: false,
+            headerStyle: { backgroundColor: Colors.background },
+            headerTitleStyle: { fontWeight: '700', fontSize: ms(18), color: Colors.textPrimary },
+          }}
+        />
+        <Stack.Screen
+          name="company-registration-tracking/[id]"
+          options={{
+            title: 'Filing tracker',
             headerTitleAlign: 'left',
             headerLeft: () => <NotificationsHeaderLeft />,
             headerShadowVisible: false,

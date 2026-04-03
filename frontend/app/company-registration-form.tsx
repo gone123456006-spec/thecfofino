@@ -552,8 +552,14 @@ export default function CompanyRegistrationFormScreen() {
         ? await updateCompanyRegistrationInBackend(mongoId, payload, token)
         : await submitCompanyRegistrationToBackend(payload, token);
       const genCaseId = result.caseId || caseId;
+      const regMongoId = result.id || mongoId || undefined;
+      if (result.id && !mongoId) setMongoId(result.id);
       setCaseId(genCaseId);
-      const final = { ...payload, caseId: genCaseId };
+      const final = {
+        ...payload,
+        caseId: genCaseId,
+        ...(regMongoId ? { _id: regMongoId } : {}),
+      };
       setCompanyRegistrationDraft(final);
       await saveCompanyRegistrationState({
         draft: final, status: 'submitted',

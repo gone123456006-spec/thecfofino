@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -45,6 +46,9 @@ try {
 }
 
 WebBrowser.maybeCompleteAuthSession();
+
+const SUPPORT_MOBILE_DISPLAY = '9153832948';
+const SUPPORT_MOBILE_TEL = '919153832948';
 
 export function LoginScreen() {
   const scalers = useScalers();
@@ -231,6 +235,24 @@ export function LoginScreen() {
     }
   }, [email, password, mode, name, mobile, loginWithEmail, signupWithEmail]);
 
+  const showForgotPasswordHelp = useCallback(() => {
+    Alert.alert(
+      'Forgot password?',
+      `To reset your password, raise a query with customer support on this mobile number:\n\n+91 ${SUPPORT_MOBILE_DISPLAY.slice(0, 5)} ${SUPPORT_MOBILE_DISPLAY.slice(5)}`,
+      [
+        { text: 'OK', style: 'cancel' },
+        {
+          text: 'Call support',
+          onPress: () => {
+            void Linking.openURL(`tel:+${SUPPORT_MOBILE_TEL}`).catch(() => {
+              Alert.alert('Unable to open dialer', `Please call +91 ${SUPPORT_MOBILE_DISPLAY} from your phone.`);
+            });
+          },
+        },
+      ],
+    );
+  }, []);
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: Colors.gradientDark }}
@@ -343,6 +365,11 @@ export function LoginScreen() {
                 />
               </Pressable>
             </View>
+            {mode === 'signin' ? (
+              <Pressable onPress={showForgotPasswordHelp} disabled={loading} hitSlop={8} style={{ marginTop: sh(8), alignSelf: 'flex-end' }}>
+                <Text style={{ fontSize: ms(14), color: Colors.primary, fontWeight: '600' }}>Forgot password?</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {/* Sign In / Sign up */}

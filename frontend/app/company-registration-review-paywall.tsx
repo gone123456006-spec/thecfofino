@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,13 +17,21 @@ import {
 } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
-import { Colors } from '@/constants/theme';
+import {
+  checkoutLogoFromApiBase,
+  completeCompanyRegistrationPaymentApi,
+  fetchMyRegistrations,
+  fetchPaymentPublicConfig,
+  getApiBase,
+  parseApiJson,
+} from '@/api/company-registration';
+import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationsContext';
 import {
   type CompanyRegistrationDraft,
-  type CompanyRegistrationPaymentMethod,
   getCompanyRegistrationDraft,
   loadCompanyRegistrationState,
+  resetLocalCompanyRegistrationAfterPaymentSuccess,
   saveCompanyRegistrationState,
   setCompanyRegistrationDraft,
 } from '@/utils/company-registration-draft';
@@ -31,10 +39,6 @@ import {
   buildRazorpayHtml,
   type RazorpayPayload,
 } from '@/utils/razorpay-webview';
-
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-const API_BASE = 'https://finovert-backend.onrender.com/api';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -134,9 +138,20 @@ function DocThumb({ uri, label }: { uri: string | null; label: string }) {
 export default function CompanyRegistrationReviewPaywallScreen() {
   const router = useRouter();
   const { addNotification } = useNotifications();
+  const { getToken } = useAuth();
   const [draft, setDraft] = useState<CompanyRegistrationDraft | null>(getCompanyRegistrationDraft());
   const [paying, setPaying] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
+
+  const [paymentAmountINR, setPaymentAmountINR] = useState(1);
+  const [productTitle, setProductTitle] = useState('Company Registration — Filing Fee');
+  const [productDescription, setProductDescription] = useState(
+    'Secure payment via Razorpay. Unlocks document upload and MCA filing.',
+  );
+  /** Server says keys exist — for warning banner only; Pay is never hard-disabled from this. */
+  const [razorpayConfiguredOnServer, setRazorpayConfiguredOnServer] = useState(true);
+  const [paymentConfigLoading, setPaymentConfigLoading] = useState(false);
+  const [checkoutLogoUrl, setCheckoutLogoUrl] = useState('');
 
   // Razorpay WebView modal
   const [razorpayHtml, setRazorpayHtml] = useState<string | null>(null);
@@ -148,18 +163,81 @@ export default function CompanyRegistrationReviewPaywallScreen() {
   const [editValue, setEditValue] = useState('');
   const [editModalVisible, setEditModalVisible] = useState(false);
 
-  const totalCost = 4999 + 2000 + 499; // ₹7,498
+  const loadPaymentConfig = useCallback(async () => {
+    setPaymentConfigLoading(true);
+    try {
+      const cfg = await fetchPaymentPublicConfig();
+      if (cfg.companyRegistrationAmountINR >= 1) {
+        setPaymentAmountINR(cfg.companyRegistrationAmountINR);
+      }
+      if (cfg.productTitle) setProductTitle(cfg.productTitle);
+      if (cfg.productDescription) setProductDescription(cfg.productDescription);
+      setRazorpayConfiguredOnServer(cfg.razorpayConfigured !== false);
+      setCheckoutLogoUrl(cfg.checkoutLogoUrl?.trim() || checkoutLogoFromApiBase(getApiBase()));
+    } catch {
+      setRazorpayConfiguredOnServer(false);
+      setCheckoutLogoUrl(checkoutLogoFromApiBase(getApiBase()));
+    } finally {
+      setPaymentConfigLoading(false);
+    }
+  }, []);
+
+  /** If submit saved draft without _id (older builds), recover Mongo id from /registrations/my. */
+  const syncRegistrationIdFromServer = useCallback(async () => {
+    const state = await loadCompanyRegistrationState();
+    const d = state.draft;
+    if (!d || d._id) return;
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const list = await fetchMyRegistrations(token);
+      const latest = list?.[0];
+      if (latest?._id) {
+        const merged: CompanyRegistrationDraft = {
+          ...d,
+          _id: latest._id,
+          ...(latest.caseId && !d.caseId ? { caseId: latest.caseId } : {}),
+        };
+        setDraft(merged);
+        setCompanyRegistrationDraft(merged);
+        await saveCompanyRegistrationState({ draft: merged });
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [getToken]);
 
   const refreshState = useCallback(async () => {
     const state = await loadCompanyRegistrationState();
     if (state.draft) setDraft(state.draft);
-    setIsPaid(state.paymentStatus === 'paid');
+    let paid = state.paymentStatus === 'paid';
     if (state.status === 'submitted') {
       await saveCompanyRegistrationState({ status: 'payment_pending' });
     }
-  }, []);
+    await syncRegistrationIdFromServer();
+    try {
+      const token = await getToken();
+      if (token) {
+        const list = await fetchMyRegistrations(token);
+        const latest = list?.[0];
+        if (latest?.paymentStatus === 'paid') paid = true;
+      }
+    } catch {
+      /* ignore */
+    }
+    setIsPaid(paid);
+  }, [syncRegistrationIdFromServer, getToken]);
 
-  useFocusEffect(useCallback(() => { void refreshState(); }, [refreshState]));
+  useEffect(() => {
+    void loadPaymentConfig();
+  }, [loadPaymentConfig]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshState();
+      void loadPaymentConfig();
+    }, [refreshState, loadPaymentConfig]),
+  );
 
   // ── Edit helpers ──────────────────────────────────────────────────────────
 
@@ -194,33 +272,58 @@ export default function CompanyRegistrationReviewPaywallScreen() {
 
   const handlePayAndInitiate = async () => {
     if (paying) return;
-    if (isPaid) { router.push('/company-registration-upload-tracking'); return; }
+    if (isPaid) {
+      const rid = draft?._id;
+      if (rid) router.push(`/company-registration-tracking/${rid}` as any);
+      else router.push('/company-registration-upload-tracking');
+      return;
+    }
+    if (!draft?._id) {
+      Alert.alert(
+        'Registration not synced',
+        'Your application ID is missing. Go back one step and submit the form again, then return here to pay.',
+      );
+      return;
+    }
 
     setPaying(true);
     try {
-      // 1. Create Razorpay order on backend
-      const res = await fetch(`${API_BASE}/payments/create-order`, {
+      const api = getApiBase();
+      const receipt = (draft?.caseId || draft?._id || `company_reg_${Date.now()}`).toString().slice(0, 40);
+      const res = await fetch(`${api}/payments/create-order`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: totalCost, currency: 'INR', receipt: 'company_reg' }),
+        body: JSON.stringify({
+          purpose: 'company_registration',
+          currency: 'INR',
+          receipt,
+        }),
       });
-      const order = await res.json() as {
-        ok: boolean; orderId: string; amount: number; currency: string; keyId: string; error?: string;
-      };
+      const order = await parseApiJson<{
+        ok: boolean;
+        orderId: string;
+        amount: number;
+        currency: string;
+        keyId: string;
+        error?: string;
+      }>(res, 'Create payment order');
 
       if (!order.ok || !order.orderId) {
         throw new Error(order.error ?? 'Could not create payment order');
       }
 
       // 2. Build WebView HTML and open it
+      const checkoutDesc = [productTitle, productDescription].filter(Boolean).join(' · ').slice(0, 240);
+      const logo = checkoutLogoUrl.trim() || checkoutLogoFromApiBase(getApiBase());
       const html = buildRazorpayHtml({
         orderId: order.orderId,
         amount: order.amount,
         currency: order.currency,
         keyId: order.keyId,
         name: 'Finovert',
-        description: 'Company Registration Filing',
-        themeColor: '#6366f1',
+        description: checkoutDesc || productTitle,
+        logoUrl: logo,
+        themeColor: '#3395ff',
       });
       setRazorpayHtml(html);
       setRazorpayModalVisible(true);
@@ -248,7 +351,8 @@ export default function CompanyRegistrationReviewPaywallScreen() {
 
       try {
         // 3. Verify payment signature on backend
-        const vRes = await fetch(`${API_BASE}/payments/verify`, {
+        const api = getApiBase();
+        const vRes = await fetch(`${api}/payments/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -257,23 +361,38 @@ export default function CompanyRegistrationReviewPaywallScreen() {
             razorpay_signature: payload.razorpay_signature,
           }),
         });
-        const vData = await vRes.json() as { ok: boolean; error?: string };
+        const vData = await parseApiJson<{ ok: boolean; error?: string }>(vRes, 'Payment verify');
 
         if (!vData.ok) throw new Error(vData.error ?? 'Signature verification failed');
 
-        // 4. Mark as paid and navigate
-    await saveCompanyRegistrationState({
-      status: 'paid',
-      paymentStatus: 'paid',
-          paymentMethod: 'upi',
-      paidAt: new Date().toISOString(),
-    });
-    addNotification({
-      title: 'Payment Successful',
-      body: 'Payment received. Upload and filing process is now unlocked.',
-    });
-    setIsPaid(true);
-        router.push('/company-registration-upload-tracking');
+        const token = await getToken();
+        const regId = draft?._id;
+        if (!token) {
+          throw new Error('Your session expired. Sign in again, then return to this screen.');
+        }
+        if (!regId) {
+          throw new Error('Registration id missing. Submit the form again from the previous step.');
+        }
+        const done = await completeCompanyRegistrationPaymentApi(
+          token,
+          regId,
+          payload.razorpay_order_id,
+          payload.razorpay_payment_id,
+          payload.razorpay_signature,
+        );
+        if (!done.ok) {
+          throw new Error(done.error ?? 'Could not save payment on server');
+        }
+
+        await resetLocalCompanyRegistrationAfterPaymentSuccess();
+        setDraft(null);
+        setIsPaid(false);
+        addNotification({
+          title: 'Payment Successful',
+          body: 'Payment received. Track progress in Status; you can start another company registration anytime.',
+        });
+        if (regId) router.push(`/company-registration-tracking/${regId}` as any);
+        else router.push('/company-registration-upload-tracking');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Verification failed';
         Alert.alert('Payment Verification Failed', msg);
@@ -303,7 +422,10 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         }}>
         <View style={rzpStyles.container}>
           <View style={rzpStyles.header}>
-            <Text style={rzpStyles.headerTitle}>Secure Payment</Text>
+            <View style={rzpStyles.headerLeft}>
+              <Text style={rzpStyles.headerTitle}>Checkout</Text>
+              <Text style={rzpStyles.headerSub}>Razorpay · Finovert</Text>
+            </View>
             <Pressable
               style={rzpStyles.closeBtn}
               onPress={() => {
@@ -314,8 +436,10 @@ export default function CompanyRegistrationReviewPaywallScreen() {
             </Pressable>
           </View>
           <View style={rzpStyles.secureBar}>
-            <Ionicons name="shield-checkmark-outline" size={13} color="#22c55e" />
-            <Text style={rzpStyles.secureText}>256-bit SSL encrypted · Secured by Razorpay</Text>
+            <Ionicons name="lock-closed-outline" size={14} color="#3395ff" />
+            <Text style={rzpStyles.secureText}>
+              Encrypted checkout — UPI & wallets via Razorpay
+            </Text>
           </View>
           {razorpayHtml ? (
             <WebView
@@ -327,7 +451,7 @@ export default function CompanyRegistrationReviewPaywallScreen() {
               startInLoadingState
               renderLoading={() => (
                 <View style={rzpStyles.loading}>
-                  <ActivityIndicator size="large" color="#6366f1" />
+                  <ActivityIndicator size="large" color="#3395ff" />
                   <Text style={rzpStyles.loadingText}>Loading payment…</Text>
                 </View>
               )}
@@ -460,21 +584,36 @@ export default function CompanyRegistrationReviewPaywallScreen() {
           </View>
         )}
 
-        {/* ── Cost Breakdown ── */}
+        {/* ── Payment summary (dashboard-managed amount) ── */}
         <View style={s.card}>
           <View style={s.cardHeader}>
-            <Ionicons name="receipt-outline" size={18} color="#6366f1" />
-            <Text style={s.cardTitle}>Cost Breakdown</Text>
+            <Ionicons name="cash-outline" size={18} color="#6366f1" />
+            <Text style={s.cardTitle}>Filing fee</Text>
           </View>
-          <View style={tableStyles.table}>
-            <TableRow label="Professional Fees" value="₹4,999" onEdit={() => { }} isLocked />
-            <TableRow label="Government Fees" value="₹2,000" onEdit={() => { }} isLocked />
-            <TableRow label="Convenience Charges" value="₹499" onEdit={() => { }} isLocked />
-      </View>
-          <View style={s.totalRow}>
-            <Text style={s.totalLabel}>Total Amount</Text>
-            <Text style={s.totalValue}>₹{totalCost.toLocaleString('en-IN')}</Text>
-        </View>
+          <View style={s.paySummaryBody}>
+            <Text style={s.paySummaryTitle}>{productTitle}</Text>
+            <Text style={s.paySummaryDesc}>{productDescription}</Text>
+            {paymentConfigLoading ? (
+              <ActivityIndicator style={{ marginTop: 12 }} color="#6366f1" />
+            ) : (
+              <View style={s.totalRow}>
+                <Text style={s.totalLabel}>Amount due</Text>
+                <Text style={s.totalValue}>₹{paymentAmountINR.toLocaleString('en-IN')}</Text>
+              </View>
+            )}
+            {!razorpayConfiguredOnServer && !paymentConfigLoading ? (
+              <View style={s.gatewayWarn}>
+                <Ionicons name="warning-outline" size={16} color="#b45309" />
+                <Text style={s.gatewayWarnText}>
+                  We could not confirm Razorpay keys on the server (or the config endpoint failed). You can still tap Pay — if
+                  checkout fails, update server .env and deploy, or use EXPO_PUBLIC_API_URL to point at the correct API.
+                </Text>
+              </View>
+            ) : null}
+            <Text style={s.dashboardHint}>
+              Fee is set from your Finovert admin dashboard and applies to all app users.
+            </Text>
+          </View>
         </View>
 
         {/* ── Timeline & Policy ── */}
@@ -516,27 +655,28 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         {/* ── Razorpay CTA ── */}
         <View style={s.card}>
           <View style={s.cardHeader}>
-            <Ionicons name="card-outline" size={18} color="#6366f1" />
-            <Text style={s.cardTitle}>Payment</Text>
+            <Ionicons name="card-outline" size={18} color="#3395ff" />
+            <Text style={s.cardTitle}>Pay with Razorpay</Text>
           </View>
           <View style={s.rzpInfoRow}>
             <Ionicons name="shield-checkmark-outline" size={16} color="#22c55e" />
-            <Text style={s.rzpInfoText}>All payment methods accepted — UPI, Cards, Net Banking, Wallets</Text>
+            <Text style={s.rzpInfoText}>
+              Checkout shows UPI and wallets only (cards, EMI, net banking and Pay Later are hidden).
+            </Text>
           </View>
           <View style={s.rzpMethodRow}>
-            {['UPI', 'Cards', 'Net Banking', 'EMI'].map((m) => (
+            {['UPI', 'Wallets'].map((m) => (
               <View key={m} style={s.rzpMethodChip}>
                 <Text style={s.rzpMethodText}>{m}</Text>
               </View>
             ))}
-      </View>
+          </View>
           <View style={s.rzpBadgeRow}>
-            <View style={s.rzpBadge}>
-              <Ionicons name="lock-closed" size={11} color="#6366f1" />
-              <Text style={s.rzpBadgeText}>Secured by Razorpay</Text>
+            <View style={s.rzpBadgeBlue}>
+              <Text style={s.rzpBadgeTextBlue}>Powered by Razorpay</Text>
+            </View>
+          </View>
         </View>
-        </View>
-      </View>
 
         {/* ── Pay CTA ── */}
       <Pressable
@@ -549,14 +689,17 @@ export default function CompanyRegistrationReviewPaywallScreen() {
             <>
               <Ionicons name={isPaid ? 'checkmark-circle' : 'lock-open-outline'} size={20} color="#fff" />
               <Text style={s.payBtnText}>
-                {isPaid ? 'Payment Done — Continue' : `Pay ₹${totalCost.toLocaleString('en-IN')} & Initiate Filing`}
+                {isPaid
+                  ? 'Payment Done — Continue'
+                  : `Pay ₹${paymentAmountINR.toLocaleString('en-IN')} & continue`}
           </Text>
             </>
         )}
       </Pressable>
 
         <Text style={s.secureNote}>
-          <Ionicons name="shield-checkmark-outline" size={12} color="#6b7280" /> 256-bit SSL encrypted & secure · Powered by Razorpay
+          <Ionicons name="shield-checkmark-outline" size={12} color="#6b7280" />{' '}
+          Your card and UPI details are processed by Razorpay. Finovert never stores them.
         </Text>
     </ScrollView>
     </>
@@ -601,7 +744,23 @@ const s = StyleSheet.create({
   uploadStatusText: { fontSize: 12, color: '#6b7280' },
 
   // Total
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#eef2ff', marginTop: 4 },
+  paySummaryBody: { paddingHorizontal: 16, paddingBottom: 16 },
+  paySummaryTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 },
+  paySummaryDesc: { fontSize: 13, color: '#6b7280', lineHeight: 19, marginBottom: 12 },
+  gatewayWarn: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#fffbeb',
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+  },
+  gatewayWarnText: { flex: 1, fontSize: 12, color: '#92400e', lineHeight: 17 },
+  dashboardHint: { fontSize: 11, color: '#9ca3af', marginTop: 12, fontStyle: 'italic' },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#eef2ff', marginTop: 4, borderRadius: 12 },
   totalLabel: { fontSize: 15, fontWeight: '700', color: '#1e1b4b' },
   totalValue: { fontSize: 18, fontWeight: '800', color: INDIGO },
 
@@ -622,8 +781,8 @@ const s = StyleSheet.create({
   rzpMethodChip: { backgroundColor: '#eef2ff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   rzpMethodText: { fontSize: 12, color: '#4338ca', fontWeight: '600' },
   rzpBadgeRow: { paddingHorizontal: 16, paddingBottom: 14 },
-  rzpBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', backgroundColor: '#f5f3ff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: '#e0e7ff' },
-  rzpBadgeText: { fontSize: 11, color: '#6366f1', fontWeight: '600' },
+  rzpBadgeBlue: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', backgroundColor: '#eff6ff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: '#bfdbfe' },
+  rzpBadgeTextBlue: { fontSize: 11, color: '#3395ff', fontWeight: '600' },
 
   // CTA
   payBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: INDIGO, paddingVertical: 17, borderRadius: 16, marginBottom: 12, shadowColor: INDIGO, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
@@ -674,12 +833,14 @@ const editStyles = StyleSheet.create({
 
 // Razorpay WebView modal
 const rzpStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 56 : 24, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  closeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
-  secureBar: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#f0fdf4', paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#dcfce7' },
-  secureText: { fontSize: 12, color: '#15803d', fontWeight: '500' },
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 56 : 24, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', backgroundColor: '#fff' },
+  headerLeft: { flex: 1 },
+  headerTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  headerSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  closeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  secureBar: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#eff6ff', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#dbeafe' },
+  secureText: { flex: 1, fontSize: 12, color: '#1e40af', fontWeight: '500', lineHeight: 17 },
   webview: { flex: 1 },
   loading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   loadingText: { marginTop: 12, fontSize: 14, color: '#6b7280' },

@@ -950,6 +950,33 @@ async function loadAppUsers() {
   }
 }
 
+async function wipeAllAppData() {
+  if (!TOKEN) return;
+  if (!confirm(
+    'Delete ALL app data?\n\nThis removes every registration, booking, app user, notification, and chat message. Razorpay fee settings stay as they are.\n\nThis cannot be undone.',
+  )) return;
+  const typed = window.prompt('Type DELETE in capital letters to confirm:');
+  if (typed !== 'DELETE') {
+    if (typed !== null) showToast('Confirmation text did not match. Nothing was deleted.', 'error');
+    return;
+  }
+  try {
+    const data = await apiFetch('/admin/wipe-all-data', { method: 'POST', body: '{}' });
+    const d = data.deleted || {};
+    showToast(
+      `Deleted: Reg ${d.registrations ?? 0}, Bookings ${d.bookings ?? 0}, Users ${d.users ?? 0}, Notifications ${d.notifications ?? 0}, Messages ${d.messages ?? 0}`,
+      'success',
+    );
+    await loadOverview();
+    if (currentTab === 'registrations') await loadRegistrations();
+    if (currentTab === 'bookings') await loadBookings();
+    if (currentTab === 'customers') await loadCustomers();
+    if (currentTab === 'appusers') await loadAppUsers();
+  } catch (err) {
+    showToast('Error: ' + err.message, 'error');
+  }
+}
+
 async function deleteUser(id) {
   if (!confirm('Are you sure you want to delete this user?')) return;
   try {

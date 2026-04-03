@@ -13,7 +13,6 @@ import {
   signUpWithEmail as firebaseSignUpWithEmail,
 } from '@/lib/firebase';
 import { useNotifications } from '@/contexts/NotificationsContext';
-import { clearCompanyRegistrationState } from '@/utils/company-registration-draft';
 
 const AUTH_KEY = '@finovert_auth';
 const TOKEN_KEY = '@finovert_token';
@@ -68,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [hasSeenWelcome, setHasSeenWelcomeState] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const { addNotification, clearNotifications } = useNotifications();
+  const { addNotification } = useNotifications();
 
   const loadStoredAuth = useCallback(async () => {
     try {
@@ -428,12 +427,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     setUser(null);
-    clearNotifications();
-    await Promise.all([
-      AsyncStorage.removeItem(AUTH_KEY),
-      AsyncStorage.removeItem(TOKEN_KEY),
-      clearCompanyRegistrationState(),
-    ]);
+    // Keep notification history in AsyncStorage so the list survives logout / reinstall is not implied — only logout.
+    await Promise.all([AsyncStorage.removeItem(AUTH_KEY), AsyncStorage.removeItem(TOKEN_KEY)]);
   }, []);
 
   const getToken = useCallback(async () => {

@@ -4,7 +4,7 @@
     "slug": "finovert",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/FinoC.png",
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
@@ -24,7 +24,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/icon.png"
+        "foregroundImage": "./assets/images/FinoC.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
