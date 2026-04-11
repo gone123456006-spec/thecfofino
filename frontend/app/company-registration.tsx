@@ -20,7 +20,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
 import { Video, ResizeMode, AVPlaybackStatus, Audio } from 'expo-av';
 import { useVideoPlayer, VideoView } from 'expo-video';
 

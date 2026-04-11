@@ -21,6 +21,7 @@ import { ms, sw } from '@/utils/responsive';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 function NotificationsHeaderLeft() {
   const router = useRouter();
@@ -167,6 +168,23 @@ function RootLayoutContent() {
           }}
         />
         <Stack.Screen
+          name="policies"
+          options={{
+            title: 'Policies',
+            headerLeft: () => <NotificationsHeaderLeft />,
+            headerBackTitle: 'Back',
+            headerShadowVisible: false,
+            headerStyle: { backgroundColor: Colors.background },
+            headerTitleStyle: { fontWeight: '700', fontSize: ms(18), color: Colors.textPrimary },
+          }}
+        />
+        <Stack.Screen
+          name="about"
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
           name="company-registration"
           options={{
             title: 'Company Registration',
@@ -242,11 +260,13 @@ function RootLayoutContent() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <NotificationsProvider>
-        <AuthProvider>
-          <RootLayoutContent />
-        </AuthProvider>
-      </NotificationsProvider>
+      <ErrorBoundary>
+        <NotificationsProvider>
+          <AuthProvider>
+            <RootLayoutContent />
+          </AuthProvider>
+        </NotificationsProvider>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }

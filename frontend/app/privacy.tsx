@@ -1,6 +1,7 @@
 import { Colors } from '@/constants/theme';
+import { getPrivacyPolicyPublicUrl } from '@/constants/legal';
 import { ms, sh, sw } from '@/utils/responsive';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const PRIVACY_CONTENT = `This Privacy Policy explains how the Company ("Company," "we," "our," or "us") collects, uses, stores, and protects your personal information when you access our website, mobile application, or financial services. By using our services, you consent to the practices described in this Policy.
 
@@ -44,9 +45,21 @@ const styles = StyleSheet.create({
     width: sw(90),
     height: sw(90),
   },
+  publicLinkWrap: {
+    marginTop: sh(16),
+    marginBottom: sh(8),
+  },
+  publicLink: {
+    fontSize: ms(15),
+    fontWeight: '600',
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
 });
 
 export default function PrivacyScreen() {
+  const publicPrivacyUrl = getPrivacyPolicyPublicUrl();
+
   return (
     <ScrollView
       style={styles.container}
@@ -54,6 +67,14 @@ export default function PrivacyScreen() {
       showsVerticalScrollIndicator={false}>
       <Text style={styles.title}>Privacy Policy</Text>
       <Text style={styles.body}>{PRIVACY_CONTENT}</Text>
+
+      {publicPrivacyUrl ? (
+        <Pressable
+          onPress={() => Linking.openURL(publicPrivacyUrl).catch(() => {})}
+          style={styles.publicLinkWrap}>
+          <Text style={styles.publicLink}>Open official privacy policy (web)</Text>
+        </Pressable>
+      ) : null}
 
       {/* Clover Logo at the End */}
       <View style={styles.brandingSection}>

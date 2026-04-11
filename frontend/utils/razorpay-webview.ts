@@ -1,5 +1,9 @@
 /**
  * Razorpay Checkout in WebView (production-safe HTML escaping + Razorpay-branded loader).
+ *
+ * **Google Play (payments):** This flow is for **company registration / professional services**
+ * (filing fees, compliance services)—**not** for digital goods or in-app subscriptions. Those
+ * would require **Google Play Billing**. Keep store listing and Data safety aligned with that.
  */
 
 export interface RazorpayOptions {

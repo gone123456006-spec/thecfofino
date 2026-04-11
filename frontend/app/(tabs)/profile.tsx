@@ -4,21 +4,17 @@ import { LogoImage } from '@/constants/assets';
 import { Colors } from '@/constants/theme';
 import { profileStyles as styles } from '../../styles/profile.styles';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { pickVisualMediaFromLibrary } from '@/utils/pick-visual-media';
+import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Linking, Pressable, ScrollView, Text, View, Modal, TextInput, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PLAY_STORE_LISTING_URL } from '@/constants/publishing';
 
 const PROFILE_IMAGE_KEY = '@finovert_auth_profile_image';
 
-const TERMS_URL = 'https://example.com/terms';
-const PRIVACY_URL = 'https://example.com/privacy';
-const POLICIES_URL = 'https://example.com/policies';
-const ABOUT_URL = 'https://example.com/about';
-const HELP_URL = 'https://example.com/help';
-const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.finovert.app';
 const CONTACT_EMAIL = 'support@finovert.com';
 
 interface EditModalProps {
@@ -113,6 +109,12 @@ function EditProfileModal({ visible, initialName, initialMobile, onClose, onSave
   );
 }
 
+const appVersion = Constants.expoConfig?.version ?? '—';
+const androidVersionCode =
+  Platform.OS === 'android'
+    ? (Constants.expoConfig?.android as { versionCode?: number } | undefined)?.versionCode
+    : undefined;
+
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -136,21 +138,19 @@ export default function ProfileScreen() {
 
   const pickImage = useCallback(async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Allow access to your photos to set a profile image.');
-        return;
-      }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
+      const result = await pickVisualMediaFromLibrary({
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
       });
       if (!result.canceled && result.assets[0]?.uri) {
-        const uri = result.assets[0].uri;
-        setProfileImageUri(uri);
-        await AsyncStorage.setItem(PROFILE_IMAGE_KEY, uri);
+        const asset = result.assets[0];
+        if (asset.type === 'video') {
+          Alert.alert('Images only', 'Please choose a photo (not a video) for your profile picture.');
+          return;
+        }
+        setProfileImageUri(asset.uri);
+        await AsyncStorage.setItem(PROFILE_IMAGE_KEY, asset.uri);
       }
     } catch (e) {
       Alert.alert('Error', 'Could not pick image. Try again.');
@@ -164,11 +164,10 @@ export default function ProfileScreen() {
 
   const openTerms = () => router.push('/terms');
   const openPrivacy = () => router.push('/privacy');
-  const openPolicies = () => Linking.openURL(POLICIES_URL).catch(() => { });
+  const openPolicies = () => router.push('/policies');
   const openAbout = () => router.push('/about');
-  const openHelp = () => Linking.openURL(HELP_URL).catch(() => { });
-  const openPlayStore = () => Linking.openURL(PLAY_STORE_URL).catch(() => { });
-  const openContact = () => Linking.openURL(`mailto:${CONTACT_EMAIL}`).catch(() => { });
+  const openHelp = () => Linking.openURL(`mailto:${CONTACT_EMAIL}?subject=Finovert%20support`).catch(() => {});
+  const openPlayStore = () => Linking.openURL(PLAY_STORE_LISTING_URL).catch(() => {});
 
   return (
     <>
@@ -283,6 +282,26 @@ export default function ProfileScreen() {
               </View>
               <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} style={styles.listRowChevron} />
             </Pressable>
+            <Pressable style={styles.listRow} onPress={openPolicies}>
+              <View style={styles.listRowIcon}>
+                <Ionicons name="reader-outline" size={22} color={Colors.primary} />
+              </View>
+              <View style={styles.listRowContent}>
+                <Text style={styles.listRowTitle}>Policies</Text>
+                <Text style={styles.listRowSubtitle}>Terms, privacy, and legal documents</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} style={styles.listRowChevron} />
+            </Pressable>
+            <Pressable style={styles.listRow} onPress={openHelp}>
+              <View style={styles.listRowIcon}>
+                <Ionicons name="help-circle-outline" size={22} color={Colors.primary} />
+              </View>
+              <View style={styles.listRowContent}>
+                <Text style={styles.listRowTitle}>Help & support</Text>
+                <Text style={styles.listRowSubtitle}>Email our team</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} style={styles.listRowChevron} />
+            </Pressable>
             <Pressable style={[styles.listRow, styles.listRowLast]} onPress={openPlayStore}>
               <View style={styles.listRowIcon}>
                 <Ionicons name="star-outline" size={22} color={Colors.primary} />
@@ -333,7 +352,10 @@ export default function ProfileScreen() {
             style={{ width: 64, height: 64, marginBottom: -14 }}
             resizeMode="contain"
           />
-          <Text style={styles.version}>Version 1.0.0</Text>
+          <Text style={styles.version}>
+            Version {appVersion}
+            {androidVersionCode != null ? ` · Build ${androidVersionCode}` : ''}
+          </Text>
         </View>
       </ScrollView>
 

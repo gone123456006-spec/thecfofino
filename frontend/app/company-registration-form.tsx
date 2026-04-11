@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { pickVisualMediaFromLibrary } from '@/utils/pick-visual-media';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -97,21 +98,20 @@ async function pickFromCamera(): Promise<string | null> {
 
 async function pickFromGallery(): Promise<string | null> {
   try {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow gallery access to upload document photos.');
-      return null;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
+    const result = await pickVisualMediaFromLibrary({
       quality: 0.7,
       allowsEditing: true,
       base64: false,
     });
     if (result.canceled || !result.assets?.length) return null;
-    return result.assets[0].uri;
+    const asset = result.assets[0];
+    if (asset.type === 'video') {
+      Alert.alert('Images or PDF only', 'Please choose a photo or use PDF for this document.');
+      return null;
+    }
+    return asset.uri;
   } catch (err) {
-    console.error('[pickFromGallery]', err);
+    if (__DEV__) console.error('[pickFromGallery]', err);
     Alert.alert('Gallery Error', 'Could not open gallery. Please try again.');
     return null;
   }

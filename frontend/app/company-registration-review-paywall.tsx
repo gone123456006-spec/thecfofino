@@ -449,12 +449,30 @@ export default function CompanyRegistrationReviewPaywallScreen() {
               javaScriptEnabled
               domStorageEnabled
               startInLoadingState
+              mixedContentMode="never"
+              setSupportMultipleWindows={false}
+              cacheEnabled={false}
+              allowsBackForwardNavigationGestures={false}
               renderLoading={() => (
                 <View style={rzpStyles.loading}>
                   <ActivityIndicator size="large" color="#3395ff" />
                   <Text style={rzpStyles.loadingText}>Loading payment…</Text>
                 </View>
               )}
+              onError={() => {
+                setRazorpayModalVisible(false);
+                Alert.alert(
+                  'Checkout unavailable',
+                  'Could not load the payment page. Check your connection and try again.',
+                );
+              }}
+              onHttpError={(e) => {
+                const code = e.nativeEvent.statusCode;
+                if (code >= 400) {
+                  setRazorpayModalVisible(false);
+                  Alert.alert('Checkout error', `Payment page failed to load (${code}). Please try again.`);
+                }
+              }}
               style={rzpStyles.webview}
             />
           ) : null}

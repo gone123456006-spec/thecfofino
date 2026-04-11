@@ -17,6 +17,8 @@ module.exports = {
     ...appJson.expo,
     extra: {
       ...appJson.expo.extra,
+      /** Public HTTPS URL for Play Console privacy policy field (optional). */
+      privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL,
       apiBaseUrl: process.env.EXPO_PUBLIC_API_URL,
       firebase: {
         apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
