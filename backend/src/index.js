@@ -44,6 +44,10 @@ app.get('/', (_req, res) => {
 app.use('/dashboard', express.static(__dirname + '/../dashboard'));
 
 // ─── Health Check ──────────────────────────────────────────────────
+app.get('/health', (_req, res) => {
+    res.status(200).type('text/plain').send('OK');
+});
+
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true, server: 'Finovert Admin API', time: new Date().toISOString() });
 });
