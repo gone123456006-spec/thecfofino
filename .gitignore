@@ -13,3 +13,7 @@ otp_response.json
 otp_verify_get.json
 test_out.txt
 ts_errors.txt
+new-upload-key.jks
+upload_certificate.pem
+*.jks
+*.pem

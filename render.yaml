@@ -2,11 +2,12 @@ services:
   - type: web
     name: finovert-backend
     env: node
-    plan: free
+    plan: starter
     region: oregon
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: 18.0.0

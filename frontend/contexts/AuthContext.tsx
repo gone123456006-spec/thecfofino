@@ -4,13 +4,10 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 import {
-  deleteFirebaseUser,
   getIdToken,
   isFirebaseConfigured,
-  signInWithEmail,
   signInWithGoogleIdToken,
   signOutFirebase,
-  signUpWithEmail as firebaseSignUpWithEmail,
 } from '@/lib/firebase';
 import { useNotifications } from '@/contexts/NotificationsContext';
 
@@ -95,6 +92,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     loadStoredAuth();
   }, [loadStoredAuth]);
+
+  useEffect(() => {
+    // Warm backend once so first auth action feels faster.
+    fetchWithTimeout(`${getApiBase()}/health`, { timeoutMs: 4000 }).catch(() => {});
+  }, []);
 
   const persistUser = useCallback(async (u: User, token: string) => {
     setUser(u);
@@ -254,9 +256,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signupWithEmail = useCallback(
     async (name: string, mobile: string, email: string, password: string) => {
-      if (!isFirebaseConfigured()) {
-        throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to frontend/.env');
-      }
       const trimmedName = name.trim();
       if (!trimmedName) throw new Error('Enter your name.');
       const digits = mobile.replace(/\D/g, '').slice(-10);
@@ -264,14 +263,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const normEmail = email.toLowerCase().trim();
       const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
       if (!gmailOk) throw new Error('Use a Gmail address (@gmail.com).');
+      if (password.length < 6) throw new Error('Password must be at least 6 characters.');
 
-      let firebaseCred: Awaited<ReturnType<typeof firebaseSignUpWithEmail>> | null = null;
       try {
-        firebaseCred = await firebaseSignUpWithEmail(normEmail, password);
-        const fbUser = firebaseCred?.user;
-        if (!fbUser) throw new Error('Could not create Firebase user.');
-        const firebaseUid = fbUser.uid;
-
         let res: Response;
         try {
           res = await fetchWithTimeout(`${getApiBase()}/auth/signup`, {
@@ -282,9 +276,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               mobile: digits,
               email: normEmail,
               password,
-              firebaseUid,
             }),
-            timeoutMs: 25000,
+            timeoutMs: 10000,
           });
         } catch (e) {
           if ((e as any)?.name === 'AbortError') throw new Error('Server is taking too long. Please try again.');
@@ -320,21 +313,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           read: true,
         });
       } catch (e: unknown) {
-        if (firebaseCred?.user) {
-          await deleteFirebaseUser(firebaseCred.user).catch(() => {});
-        }
-        await signOutFirebase().catch(() => {});
-
         const anyErr = e as { code?: string; message?: string };
-        if (anyErr?.code === 'auth/email-already-in-use') {
-          throw new Error('This email is already registered. Try signing in.');
-        }
-        if (anyErr?.code === 'auth/weak-password') {
-          throw new Error('Password is too weak. Use at least 6 characters.');
-        }
-        if (anyErr?.code === 'auth/invalid-email') {
-          throw new Error('Invalid email address.');
-        }
         throw e instanceof Error ? e : new Error(anyErr?.message || 'Sign-up failed.');
       }
     },
@@ -357,15 +336,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithEmail = useCallback(
     async (email: string, password: string) => {
-      if (!isFirebaseConfigured()) {
-        throw new Error('Firebase is not configured. Add EXPO_PUBLIC_FIREBASE_* to frontend/.env');
-      }
+      const normEmail = email.toLowerCase().trim();
+      const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
+      if (!gmailOk) throw new Error('Use a Gmail address (@gmail.com).');
+      if (password.length < 6) throw new Error('Password must be at least 6 characters.');
+
       try {
-        const cred = await signInWithEmail(email.toLowerCase().trim(), password);
-        const fbUser = cred?.user;
-        if (!fbUser) throw new Error('Firebase sign-in failed.');
-        const firebaseIdToken = await getIdToken(fbUser);
-        await exchangeFirebaseTokenForAppSession(firebaseIdToken, fbUser.email ?? email);
+        let res: Response;
+        try {
+          res = await fetchWithTimeout(`${getApiBase()}/auth/email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: normEmail, password }),
+            timeoutMs: 10000,
+          });
+        } catch (e) {
+          if ((e as any)?.name === 'AbortError') throw new Error('Server is taking too long. Please try again.');
+          handleNetworkError(e);
+        }
+
+        const text = await (res!).text();
+        let json: {
+          ok?: boolean;
+          error?: string;
+          token?: string;
+          user?: { name?: string; mobile?: string; email?: string };
+        };
+        try {
+          json = text ? JSON.parse(text) : {};
+        } catch {
+          throw new Error((res!).status >= 500 ? 'Server error.' : 'Invalid response.');
+        }
+        if (!(res!).ok) throw new Error(json.error || 'Sign-in failed.');
+        if (!json.ok || !json.token) throw new Error(json.error || 'Sign-in failed.');
+
+        const u: User = {
+          name: json.user?.name ?? '',
+          mobile: json.user?.mobile ?? '',
+          email: json.user?.email ?? normEmail,
+        };
+        await persistUser(u, json.token);
 
         // Action-based notification
         addNotification({
@@ -375,19 +385,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       } catch (e: any) {
         console.error('AuthContext: loginWithEmail error:', e);
-        if (e?.code === 'auth/invalid-credential' || e?.code === 'auth/wrong-password') {
-          throw new Error('Incorrect email or password.');
-        }
-        if (e?.code === 'auth/user-not-found') {
-          throw new Error('No account found for this email. Sign up first.');
-        }
-        if (e?.code === 'auth/invalid-email') {
-          throw new Error('Invalid email address.');
-        }
         throw e;
       }
     },
-    [exchangeFirebaseTokenForAppSession],
+    [handleNetworkError, persistUser],
   );
 
   /** Exchange Firebase ID token for app JWT. Call after Firebase sign-in (email/password or Google). */
