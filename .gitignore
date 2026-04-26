@@ -6,7 +6,6 @@ build/
 *.log
 .DS_Store
 .env
-package-lock.json
 build_error*.json
 build_info*.txt
 otp_response.json
