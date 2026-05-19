@@ -29,6 +29,44 @@ services:
         sync: false
       - key: DEMO_OTP_ENABLED
         value: "0"
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+  # Pings the web service every minute to prevent Render free/starter spin-down
+  - type: cron
+    name: finovert-uptime-ping
+    runtime: node
+    plan: starter
+    region: oregon
+    schedule: "*/1 * * * *"
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: node scripts/uptime-ping.js
+    envVars:
+      - key: NODE_VERSION
+        value: 18.0.0
+      - key: PING_HOST
+        fromService:
+          type: web
+          name: finovert-backend
+          property: host
+      - key: PING_PORT
+        fromService:
+          type: web
+          name: finovert-backend
+          property: port
+      - key: PING_PATH
+        value: /api/health
 
   - type: static
     name: finovert-dashboard
