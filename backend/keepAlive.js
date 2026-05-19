@@ -1,45 +1,22 @@
-const https = require('https');
-
-const DEFAULT_APP_URL = 'https://thecfofino-3.onrender.com/dashboard/';
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
-
-function getConfig() {
-    const url = process.env.KEEP_ALIVE_URL || DEFAULT_APP_URL;
-    const intervalMs = Number(process.env.KEEP_ALIVE_INTERVAL_MS) || DEFAULT_INTERVAL_MS;
-    return { url, intervalMs };
-}
-
-function ping(url) {
-    return new Promise((resolve, reject) => {
-        const startedAt = Date.now();
-        const req = https.get(url, (res) => {
-            res.resume();
-            const durationMs = Date.now() - startedAt;
-            resolve({ statusCode: res.statusCode || 0, durationMs });
-        });
-
-        req.setTimeout(15000, () => {
-            req.destroy(new Error('Request timed out after 15000ms'));
-        });
-
-        req.on('error', (error) => {
-            reject(error);
-        });
-    });
-}
+/**
+ * Long-running keep-alive client (local dev or a separate worker process).
+ * On Render, prefer the finovert-uptime-ping cron job in render.yaml (external pings).
+ */
+const { getPingConfig, ping, isSuccessStatus } = require('./src/utils/uptimePing');
 
 function startKeepAlive() {
-    const { url, intervalMs } = getConfig();
+    const { url, intervalMs, timeoutMs } = getPingConfig();
     console.log(`[keep-alive] Started. Target: ${url}`);
-    console.log(`[keep-alive] Ping interval: ${intervalMs}ms`);
+    console.log(`[keep-alive] Ping interval: ${intervalMs}ms (${Math.round(intervalMs / 1000)}s)`);
 
     const run = async () => {
         try {
-            const { statusCode, durationMs } = await ping(url);
-            if (statusCode >= 200 && statusCode < 400) {
-                console.log(`[keep-alive] SUCCESS ${new Date().toISOString()} status=${statusCode} duration=${durationMs}ms`);
+            const { statusCode, durationMs } = await ping(url, timeoutMs);
+            const ts = new Date().toISOString();
+            if (isSuccessStatus(statusCode)) {
+                console.log(`[keep-alive] SUCCESS ${ts} status=${statusCode} duration=${durationMs}ms`);
             } else {
-                console.error(`[keep-alive] FAIL ${new Date().toISOString()} status=${statusCode} duration=${durationMs}ms`);
+                console.error(`[keep-alive] FAIL ${ts} status=${statusCode} duration=${durationMs}ms`);
             }
         } catch (error) {
             console.error(`[keep-alive] ERROR ${new Date().toISOString()} message="${error.message}"`);

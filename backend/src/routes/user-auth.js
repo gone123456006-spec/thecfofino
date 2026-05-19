@@ -3,6 +3,18 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const User = require('../models/User');
+const {
+    isSmtpConfigured,
+    generateOtpCode,
+    storeEmailOtp,
+    canResend,
+    verifyOtpForEmail,
+    createVerificationSession,
+    consumeVerificationSession,
+    sendOtpEmail,
+    RESEND_COOLDOWN_MS,
+    OTP_LENGTH,
+} = require('../services/emailOtp');
 
 const router = express.Router();
 const SALT_ROUNDS = 10;
@@ -217,7 +229,7 @@ router.post('/email', async (req, res) => {
 
 /**
  * POST /api/auth/google
- * Exchange Firebase ID token for app JWT. User must already exist (sign up via /signup or other flows).
+ * Exchange Firebase/Google ID token for app JWT. Creates account on first sign-in.
  * Body: { idToken }
  */
 router.post('/google', async (req, res) => {
@@ -259,21 +271,31 @@ router.post('/google', async (req, res) => {
 
         const firebaseSub = decoded.sub || decoded.user_id || null;
         const normEmail = normalizeEmail(googleEmail);
-        const user = await User.findOne({ email: normEmail });
+        let user = await User.findOne({ email: normEmail });
 
         if (!user) {
-            return res.status(403).json({
-                ok: false,
-                error:
-                    'No Finovert account for this email yet. Sign up with your Gmail, name, and mobile first.',
+            const displayName =
+                (decoded.name && String(decoded.name).trim()) ||
+                (decoded.given_name && String(decoded.given_name).trim()) ||
+                normEmail.split('@')[0];
+            user = await User.create({
+                email: normEmail,
+                name: displayName,
+                firebaseUid: firebaseSub ? String(firebaseSub) : undefined,
+                isVerified: true,
+                lastLoginAt: new Date(),
             });
+        } else {
+            user.lastLoginAt = new Date();
+            if (firebaseSub && !user.firebaseUid) {
+                user.firebaseUid = firebaseSub;
+            }
+            const tokenName = decoded.name && String(decoded.name).trim();
+            if (tokenName && (!user.name || user.name === 'User')) {
+                user.name = tokenName;
+            }
+            await user.save();
         }
-
-        user.lastLoginAt = new Date();
-        if (firebaseSub && !user.firebaseUid) {
-            user.firebaseUid = firebaseSub;
-        }
-        await user.save();
 
         const jwtSecret = getJwtSecret(res);
         if (!jwtSecret) return;
@@ -290,6 +312,201 @@ router.post('/google', async (req, res) => {
         return res.status(500).json({
             ok: false,
             error: 'Google sign-in failed. Please try again.',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/email-otp/send
+ * Send a 6-digit OTP to a Gmail address via SMTP.
+ * Body: { email }
+ */
+router.post('/email-otp/send', async (req, res) => {
+    try {
+        const { email } = req.body || {};
+        if (!email) {
+            return res.status(400).json({ ok: false, error: 'Gmail address is required.' });
+        }
+        if (!isGmailAddress(email)) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Use a Gmail address (@gmail.com or @googlemail.com).',
+            });
+        }
+
+        const normEmail = normalizeEmail(email);
+
+        if (!canResend(normEmail)) {
+            return res.status(429).json({
+                ok: false,
+                error: `Please wait ${Math.ceil(RESEND_COOLDOWN_MS / 1000)} seconds before requesting another code.`,
+            });
+        }
+
+        if (!isSmtpConfigured()) {
+            const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
+            if (!demoEnabled) {
+                return res.status(500).json({
+                    ok: false,
+                    error:
+                        'Email OTP is not configured. Set SMTP_USER and SMTP_PASS (Gmail App Password) in backend .env.',
+                });
+            }
+        }
+
+        const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
+        const code = demoEnabled ? String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH) : generateOtpCode();
+        storeEmailOtp(normEmail, code);
+
+        if (demoEnabled && !isSmtpConfigured()) {
+            console.log(`[email-otp/send] DEMO ONLY (no SMTP): OTP ${code} for ${normEmail}`);
+            return res.status(200).json({
+                ok: true,
+                demo: true,
+                message: 'Demo mode: SMTP not configured. Use the demo OTP from server logs.',
+            });
+        }
+
+        await sendOtpEmail(normEmail, code);
+        console.log(`[email-otp/send] OTP emailed to ${normEmail}`);
+        return res.status(200).json({
+            ok: true,
+            message: `A ${OTP_LENGTH}-digit code was sent to your Gmail.`,
+        });
+    } catch (err) {
+        console.error('[email-otp/send] error:', err);
+        return res.status(500).json({
+            ok: false,
+            error: 'Failed to send OTP. Check SMTP settings and try again.',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/email-otp/verify
+ * Step 2: Verify 6-digit OTP for the given Gmail only (one-time, per-email).
+ * Body: { email, code }
+ * Returns: { verificationToken } to complete profile in step 3.
+ */
+router.post('/email-otp/verify', async (req, res) => {
+    try {
+        const { email, code } = req.body || {};
+
+        if (!email || code === undefined || code === null || code === '') {
+            return res.status(400).json({ ok: false, error: 'Gmail and 6-digit OTP are required.' });
+        }
+        if (!isGmailAddress(email)) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Use a Gmail address (@gmail.com or @googlemail.com).',
+            });
+        }
+
+        const normEmail = normalizeEmail(email);
+        const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
+
+        if (demoEnabled && !isSmtpConfigured()) {
+            const demoCode = String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH);
+            const entered = String(code).replace(/\D/g, '');
+            if (entered !== demoCode) {
+                return res.status(400).json({
+                    ok: false,
+                    error: `Invalid OTP. Demo code is ${demoCode}.`,
+                });
+            }
+        } else {
+            const check = verifyOtpForEmail(normEmail, code);
+            if (!check.ok) {
+                return res.status(400).json({ ok: false, error: check.error });
+            }
+        }
+
+        const verificationToken = createVerificationSession(normEmail);
+        return res.status(200).json({
+            ok: true,
+            email: normEmail,
+            verificationToken,
+            message: 'Gmail verified. Add your name and mobile to finish.',
+        });
+    } catch (err) {
+        console.error('[email-otp/verify] error:', err);
+        return res.status(500).json({
+            ok: false,
+            error: 'OTP verification failed. Please try again.',
+        });
+    }
+});
+
+/**
+ * POST /api/auth/email-otp/complete
+ * Step 3: After OTP verified — set name & mobile, sign in.
+ * Body: { email, verificationToken, name, mobile }
+ */
+router.post('/email-otp/complete', async (req, res) => {
+    try {
+        const { email, verificationToken, name, mobile } = req.body || {};
+
+        if (!email || !verificationToken) {
+            return res.status(400).json({ ok: false, error: 'Complete Gmail verification first.' });
+        }
+        if (!name || !String(name).trim()) {
+            return res.status(400).json({ ok: false, error: 'Name is required.' });
+        }
+        const mobileDigits = normalizeMobileDigits(mobile);
+        if (!mobileDigits) {
+            return res.status(400).json({ ok: false, error: 'Enter a valid 10-digit mobile number.' });
+        }
+        if (!isGmailAddress(email)) {
+            return res.status(400).json({
+                ok: false,
+                error: 'Use a Gmail address (@gmail.com or @googlemail.com).',
+            });
+        }
+
+        const normEmail = normalizeEmail(email);
+        const sessionCheck = consumeVerificationSession(verificationToken, normEmail);
+        if (!sessionCheck.ok) {
+            return res.status(401).json({ ok: false, error: sessionCheck.error });
+        }
+
+        let user = await User.findOne({ email: normEmail });
+
+        if (!user) {
+            user = await User.create({
+                email: normEmail,
+                name: String(name).trim(),
+                mobile: mobileDigits,
+                isVerified: true,
+                lastLoginAt: new Date(),
+            });
+        } else {
+            user.name = String(name).trim();
+            user.mobile = mobileDigits;
+            user.isVerified = true;
+            user.lastLoginAt = new Date();
+            await user.save();
+        }
+
+        const jwtSecret = getJwtSecret(res);
+        if (!jwtSecret) return;
+
+        const token = signAppToken(user);
+        return res.status(200).json({
+            ok: true,
+            token,
+            user: userJson(user),
+        });
+    } catch (err) {
+        console.error('[email-otp/complete] error:', err);
+        if (err.code === 11000) {
+            return res.status(409).json({
+                ok: false,
+                error: 'This email or mobile is already registered.',
+            });
+        }
+        return res.status(500).json({
+            ok: false,
+            error: 'Sign-in failed. Please try again.',
         });
     }
 });

@@ -49,7 +49,17 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, server: 'Finovert Admin API', time: new Date().toISOString() });
+    res.json({
+        ok: true,
+        server: 'Finovert Admin API',
+        time: new Date().toISOString(),
+        uptimeSeconds: Math.floor(process.uptime()),
+    });
+});
+
+// Lightweight ping for uptime monitors (HEAD/GET, no auth, no DB)
+app.head('/api/health', (_req, res) => {
+    res.status(200).end();
 });
 
 // ─── Public branding (Razorpay checkout `image` must be an HTTPS/HTTP URL) ─
@@ -121,6 +131,12 @@ mongoose
         httpServer = app.listen(config.port, () => {
             console.log(`🚀 Finovert API running at http://localhost:${config.port}`);
             console.log(`📊 Admin Dashboard:   http://localhost:${config.port}/dashboard`);
+            const smtp = config.smtp || {};
+            if (smtp.user && smtp.pass) {
+                console.log(`📧 Gmail OTP SMTP:    ${smtp.user} (email-otp routes active)`);
+            } else {
+                console.warn('⚠️  Gmail OTP SMTP not set — add SMTP_USER and SMTP_PASS to .env');
+            }
         });
         httpServer.on('error', (err) => {
             if (err.code === 'EADDRINUSE') {
