@@ -824,7 +824,10 @@ async function loadRazorpayAppSettings() {
     const res = await fetch(API + '/payments/public-config');
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'Failed to load');
-    document.getElementById('rzp-app-amount').value = d.companyRegistrationRazorpayAmountINR ?? 1;
+    document.getElementById('rzp-app-amount').value =
+      d.companyRegistrationBasePriceINR ?? d.companyRegistrationAmountINR ?? 1;
+    const gstEl = document.getElementById('rzp-app-gst');
+    if (gstEl) gstEl.value = d.companyRegistrationGstPercent ?? 0;
     document.getElementById('rzp-app-title').value = d.companyRegistrationProductTitle || '';
     document.getElementById('rzp-app-desc').value = d.companyRegistrationProductDescription || '';
     statusEl.textContent = d.razorpayConfigured
@@ -837,10 +840,15 @@ async function loadRazorpayAppSettings() {
 
 async function saveRazorpayAppSettings() {
   const companyRegistrationRazorpayAmountINR = Number(document.getElementById('rzp-app-amount').value);
+  const companyRegistrationGstPercent = Number(document.getElementById('rzp-app-gst')?.value ?? 0);
   const companyRegistrationProductTitle = document.getElementById('rzp-app-title').value.trim();
   const companyRegistrationProductDescription = document.getElementById('rzp-app-desc').value.trim();
   if (!Number.isFinite(companyRegistrationRazorpayAmountINR) || companyRegistrationRazorpayAmountINR < 1) {
-    showToast('Amount must be at least ₹1.', 'error');
+    showToast('Base price must be at least ₹1.', 'error');
+    return;
+  }
+  if (!Number.isFinite(companyRegistrationGstPercent) || companyRegistrationGstPercent < 0 || companyRegistrationGstPercent > 100) {
+    showToast('GST % must be between 0 and 100.', 'error');
     return;
   }
   try {
@@ -848,6 +856,7 @@ async function saveRazorpayAppSettings() {
       method: 'PATCH',
       body: JSON.stringify({
         companyRegistrationRazorpayAmountINR,
+        companyRegistrationGstPercent,
         companyRegistrationProductTitle,
         companyRegistrationProductDescription,
       }),

@@ -41,6 +41,11 @@ const CompanyRegistrationSchema = new mongoose.Schema({
     paidAt: Date,
     adminNotes: String,
     assignedTo: String,
+    /** Keys: payment_received, document_submitted, …, pending_payment, pending_process → Date sent */
+    emailsSent: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+    },
 }, {
     timestamps: true,
     // Index on createdAt so sort({ createdAt: -1 }) uses the index instead of in-memory sort

@@ -13,6 +13,7 @@ const otpRoutes = require('./routes/otp');
 const usersRoutes = require('./routes/users');
 const notificationsRoutes = require('./routes/notifications');
 const messagesRoutes = require('./routes/messages');
+const appVersionRoutes = require('./routes/app-version');
 const User = require('./models/User');
 
 const app = express();
@@ -88,6 +89,7 @@ app.use('/api/otp', otpRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/app', appVersionRoutes);
 
 // ─── Start Server ─────────────────────────────────────────────────
 let httpServer = null;
@@ -133,9 +135,9 @@ mongoose
             console.log(`📊 Admin Dashboard:   http://localhost:${config.port}/dashboard`);
             const smtp = config.smtp || {};
             if (smtp.user && smtp.pass) {
-                console.log(`📧 Gmail OTP SMTP:    ${smtp.user} (email-otp routes active)`);
+                console.log(`📧 Gmail SMTP:        ${smtp.user} (OTP + registration tracking emails)`);
             } else {
-                console.warn('⚠️  Gmail OTP SMTP not set — add SMTP_USER and SMTP_PASS to .env');
+                console.warn('⚠️  Gmail SMTP not set — add SMTP_USER and SMTP_PASS to .env');
             }
         });
         httpServer.on('error', (err) => {

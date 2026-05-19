@@ -295,14 +295,19 @@
           </div>
           <div class="modal-body" style="padding-top:0;">
             <div class="form-group">
-              <label>Amount (INR) — minimum ₹1</label>
+              <label>Base price (INR) — minimum ₹1</label>
               <input type="number" id="rzp-app-amount" class="filter-select" style="width:100%" min="1" step="1"
-                placeholder="1" />
+                placeholder="2500" />
+            </div>
+            <div class="form-group">
+              <label>GST % (0–100)</label>
+              <input type="number" id="rzp-app-gst" class="filter-select" style="width:100%" min="0" max="100" step="0.01"
+                placeholder="0" />
             </div>
             <div class="form-group">
               <label>Product title (Razorpay checkout)</label>
               <input type="text" id="rzp-app-title" class="filter-select" style="width:100%"
-                placeholder="Company Registration — Filing Fee" />
+                placeholder="Company Registration" />
             </div>
             <div class="form-group">
               <label>Description (app + checkout)</label>

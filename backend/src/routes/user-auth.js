@@ -15,8 +15,14 @@ const {
     RESEND_COOLDOWN_MS,
     OTP_LENGTH,
 } = require('../services/emailOtp');
+const { queueSyncForLoginUser } = require('../services/registrationEmailService');
 
 const router = express.Router();
+
+function notifyRegistrationEmailsForUser(user) {
+    if (!user?._id || !user?.email) return;
+    queueSyncForLoginUser(user._id, user.email);
+}
 const SALT_ROUNDS = 10;
 
 function decodeJwtPayload(token) {
@@ -41,7 +47,8 @@ function isGmailAddress(email) {
 
 function normalizeMobileDigits(mobile) {
     const digits = String(mobile || '').replace(/\D/g, '').slice(-10);
-    return digits.length === 10 ? digits : null;
+    if (!/^[6-9]\d{9}$/.test(digits)) return null;
+    return digits;
 }
 
 function getJwtSecret(res) {
@@ -71,6 +78,14 @@ function userJson(user) {
         mobile: user.mobile || '',
         isVerified: user.isVerified,
     };
+}
+
+/** True when this Gmail already has name + valid Indian mobile (returning user). */
+function isProfileComplete(user) {
+    if (!user) return false;
+    const name = String(user.name || '').trim();
+    const mobile = normalizeMobileDigits(user.mobile);
+    return Boolean(name && mobile);
 }
 
 async function verifyPassword(user, plain) {
@@ -139,6 +154,7 @@ router.post('/signup', async (req, res) => {
         if (!jwtSecret) return;
 
         const token = signAppToken(user);
+        notifyRegistrationEmailsForUser(user);
         return res.status(201).json({
             ok: true,
             token,
@@ -212,6 +228,7 @@ router.post('/email', async (req, res) => {
         await user.save();
 
         const token = signAppToken(user);
+        notifyRegistrationEmailsForUser(user);
 
         return res.status(200).json({
             ok: true,
@@ -301,6 +318,7 @@ router.post('/google', async (req, res) => {
         if (!jwtSecret) return;
 
         const token = signAppToken(user);
+        notifyRegistrationEmailsForUser(user);
 
         return res.status(200).json({
             ok: true,
@@ -421,10 +439,33 @@ router.post('/email-otp/verify', async (req, res) => {
             }
         }
 
+        const existingUser = await User.findOne({ email: normEmail });
+
+        if (isProfileComplete(existingUser)) {
+            existingUser.isVerified = true;
+            existingUser.lastLoginAt = new Date();
+            await existingUser.save();
+
+            const jwtSecret = getJwtSecret(res);
+            if (!jwtSecret) return;
+
+            const token = signAppToken(existingUser);
+            notifyRegistrationEmailsForUser(existingUser);
+            return res.status(200).json({
+                ok: true,
+                email: normEmail,
+                profileComplete: true,
+                token,
+                user: userJson(existingUser),
+                message: 'Welcome back!',
+            });
+        }
+
         const verificationToken = createVerificationSession(normEmail);
         return res.status(200).json({
             ok: true,
             email: normEmail,
+            profileComplete: false,
             verificationToken,
             message: 'Gmail verified. Add your name and mobile to finish.',
         });
@@ -479,10 +520,13 @@ router.post('/email-otp/complete', async (req, res) => {
                 isVerified: true,
                 lastLoginAt: new Date(),
             });
-        } else {
+        } else if (!isProfileComplete(user)) {
             user.name = String(name).trim();
             user.mobile = mobileDigits;
             user.isVerified = true;
+            user.lastLoginAt = new Date();
+            await user.save();
+        } else {
             user.lastLoginAt = new Date();
             await user.save();
         }
@@ -491,6 +535,7 @@ router.post('/email-otp/complete', async (req, res) => {
         if (!jwtSecret) return;
 
         const token = signAppToken(user);
+        notifyRegistrationEmailsForUser(user);
         return res.status(200).json({
             ok: true,
             token,

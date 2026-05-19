@@ -6,7 +6,9 @@ const mongoose = require('mongoose');
 const AppSettingsSchema = new mongoose.Schema({
     key: { type: String, default: 'global', unique: true, index: true },
     companyRegistrationRazorpayAmountINR: { type: Number, default: 1, min: 1 },
-    companyRegistrationProductTitle: { type: String, default: 'Company Registration — Filing Fee' },
+    /** GST % applied on base price (0 = no tax line added). */
+    companyRegistrationGstPercent: { type: Number, default: 0, min: 0, max: 100 },
+    companyRegistrationProductTitle: { type: String, default: 'Company Registration' },
     companyRegistrationProductDescription: {
         type: String,
         default: 'Secure payment via Razorpay. Unlocks document upload and MCA filing workflow.',

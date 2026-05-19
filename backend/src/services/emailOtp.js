@@ -1,6 +1,6 @@
 const crypto = require('crypto');
-const nodemailer = require('nodemailer');
 const config = require('../config');
+const { sendMail, isSmtpConfigured } = require('./mailer');
 
 const OTP_LENGTH = 6;
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -13,28 +13,6 @@ const emailOtpStore = new Map();
 
 /** @type {Map<string, { email: string, expiresAt: number }>} */
 const verificationSessionStore = new Map();
-
-let transporter = null;
-
-function isSmtpConfigured() {
-    const smtp = config.smtp || {};
-    return Boolean(smtp.user && smtp.pass);
-}
-
-function getTransporter() {
-    if (transporter) return transporter;
-    const smtp = config.smtp;
-    transporter = nodemailer.createTransport({
-        host: smtp.host,
-        port: smtp.port,
-        secure: smtp.secure,
-        auth: {
-            user: smtp.user,
-            pass: smtp.pass,
-        },
-    });
-    return transporter;
-}
 
 /** Cryptographically random 6-digit code (000000–999999). New code on every send. */
 function generateOtpCode() {
@@ -128,11 +106,7 @@ function consumeVerificationSession(verificationToken, email) {
 }
 
 async function sendOtpEmail(toEmail, code) {
-    const smtp = config.smtp;
-    const from = smtp.from || smtp.user;
-    const mailer = getTransporter();
-    await mailer.sendMail({
-        from: `"Finovert" <${from}>`,
+    await sendMail({
         to: toEmail,
         subject: `${code} is your Finovert sign-in code`,
         text:

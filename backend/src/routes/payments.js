@@ -7,32 +7,55 @@ const auth = require('../middleware/auth');
 const userAuth = require('../middleware/userAuth');
 const CompanyRegistration = require('../models/CompanyRegistration');
 const { getAppSettings } = require('../services/appSettings');
+const { computeCompanyRegistrationPayment } = require('../utils/company-registration-payment');
+const { getRazorpayCredentials, isValidRazorpayKeyId } = require('../utils/razorpay-env');
+const { queueRegistrationEmails } = require('../services/registrationEmailService');
 
 const router = express.Router();
 
 // ─── Razorpay Initialization ──────────────────────────────────────────────────
 let razorpay = null;
+let razorpayKeyId = '';
 
 function getRazorpay() {
     if (razorpay) return razorpay;
 
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    const { keyId, keySecret, fixedTypo } = getRazorpayCredentials();
 
     if (!keyId || !keySecret) {
         console.warn('⚠️  RAZORPAY_KEY_ID or RAZORPAY_KEY_SECRET missing in .env — payments disabled.');
         return null;
     }
 
+    if (!isValidRazorpayKeyId(keyId)) {
+        console.error(
+            '❌ Invalid RAZORPAY_KEY_ID — must start with rzp_test_ or rzp_live_ (check backend/.env).',
+        );
+        return null;
+    }
+
+    if (fixedTypo) {
+        console.warn('⚠️  RAZORPAY_KEY_ID was missing leading "r" (zp_* → rzp_*). Update .env to rzp_live_... or rzp_test_...');
+    }
+
     try {
         razorpay = new Razorpay({ key_id: keyId, key_secret: keySecret });
-        console.log('✅ Razorpay initialized — Key ID:', keyId.slice(0, 12) + '...');
+        razorpayKeyId = keyId;
+        console.log('✅ Razorpay initialized — Key ID:', keyId.slice(0, 16) + '...');
     } catch (err) {
         console.error('❌ Razorpay initialization failed:', err.message);
         return null;
     }
 
     return razorpay;
+}
+
+function razorpayAuthErrorMessage() {
+    const { keyId } = getRazorpayCredentials();
+    if (!isValidRazorpayKeyId(keyId)) {
+        return 'Payment gateway misconfigured: RAZORPAY_KEY_ID must start with rzp_test_ or rzp_live_.';
+    }
+    return 'Payment gateway authentication failed. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in backend/.env (test keys must be a matching pair from Razorpay Dashboard).';
 }
 
 // Initialize on startup
@@ -60,7 +83,7 @@ function isValidCurrency(currency) {
 }
 
 function verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature) {
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    const { keySecret } = getRazorpayCredentials();
     if (!keySecret) return { ok: false, error: 'Payment gateway not configured.' };
     const body = razorpay_order_id + '|' + razorpay_payment_id;
     const expected = crypto.createHmac('sha256', keySecret).update(body).digest('hex');
@@ -83,6 +106,7 @@ function verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpa
 router.get('/public-config', async (req, res) => {
     try {
         const settings = await getAppSettings();
+        const pricing = computeCompanyRegistrationPayment(settings);
         const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https')
             .split(',')[0]
             .trim();
@@ -90,11 +114,19 @@ router.get('/public-config', async (req, res) => {
         const checkoutLogoUrl = host ? `${proto}://${host}/api/branding/finovert-logo.png` : '';
         return res.json({
             ok: true,
-            companyRegistrationAmountINR: settings.companyRegistrationRazorpayAmountINR,
+            companyRegistrationBasePriceINR: pricing.basePriceINR,
+            companyRegistrationGstPercent: pricing.gstPercent,
+            companyRegistrationGstAmountINR: pricing.gstAmountINR,
+            companyRegistrationTotalPayableINR: pricing.totalPayableINR,
+            /** @deprecated use companyRegistrationTotalPayableINR */
+            companyRegistrationAmountINR: pricing.totalPayableINR,
             productTitle: settings.companyRegistrationProductTitle,
             productDescription: settings.companyRegistrationProductDescription,
             currency: 'INR',
-            razorpayConfigured: Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+            razorpayConfigured: (() => {
+                const { keyId, keySecret } = getRazorpayCredentials();
+                return Boolean(keyId && keySecret && isValidRazorpayKeyId(keyId));
+            })(),
             checkoutLogoUrl,
         });
     } catch (err) {
@@ -108,6 +140,7 @@ router.patch('/admin-settings', auth, async (req, res) => {
     try {
         const {
             companyRegistrationRazorpayAmountINR,
+            companyRegistrationGstPercent,
             companyRegistrationProductTitle,
             companyRegistrationProductDescription,
         } = req.body || {};
@@ -121,6 +154,13 @@ router.patch('/admin-settings', auth, async (req, res) => {
             }
             settings.companyRegistrationRazorpayAmountINR = n;
         }
+        if (companyRegistrationGstPercent !== undefined && companyRegistrationGstPercent !== null) {
+            const g = Number(companyRegistrationGstPercent);
+            if (!Number.isFinite(g) || g < 0 || g > 100) {
+                return res.status(400).json({ ok: false, error: 'GST % must be between 0 and 100.' });
+            }
+            settings.companyRegistrationGstPercent = g;
+        }
         if (typeof companyRegistrationProductTitle === 'string' && companyRegistrationProductTitle.trim()) {
             settings.companyRegistrationProductTitle = companyRegistrationProductTitle.trim().slice(0, 120);
         }
@@ -128,9 +168,13 @@ router.patch('/admin-settings', auth, async (req, res) => {
             settings.companyRegistrationProductDescription = companyRegistrationProductDescription.trim().slice(0, 500);
         }
         await settings.save();
+        const pricing = computeCompanyRegistrationPayment(settings);
         return res.json({
             ok: true,
             companyRegistrationRazorpayAmountINR: settings.companyRegistrationRazorpayAmountINR,
+            companyRegistrationGstPercent: settings.companyRegistrationGstPercent,
+            companyRegistrationGstAmountINR: pricing.gstAmountINR,
+            companyRegistrationTotalPayableINR: pricing.totalPayableINR,
             companyRegistrationProductTitle: settings.companyRegistrationProductTitle,
             companyRegistrationProductDescription: settings.companyRegistrationProductDescription,
         });
@@ -171,12 +215,15 @@ router.post('/complete-company-registration', userAuth, async (req, res) => {
         }
 
         const appSettings = await getAppSettings();
+        const pricing = computeCompanyRegistrationPayment(appSettings);
         reg.paymentStatus = 'paid';
-        reg.paymentAmount = appSettings.companyRegistrationRazorpayAmountINR;
+        reg.paymentAmount = pricing.totalPayableINR;
         reg.paymentMethod = 'razorpay';
         reg.paymentReference = razorpay_payment_id;
         reg.paidAt = new Date();
         await reg.save();
+
+        queueRegistrationEmails(reg._id);
 
         return res.json({
             ok: true,
@@ -217,11 +264,13 @@ router.post('/create-order', async (req, res) => {
         let amount;
         if (purpose === 'company_registration') {
             const settings = await getAppSettings();
-            amount = settings.companyRegistrationRazorpayAmountINR;
+            const pricing = computeCompanyRegistrationPayment(settings);
+            amount = pricing.totalPayableINR;
             // Legacy dashboard value → normalize to ₹1 (current product default)
             if (amount === 7498) {
                 amount = 1;
                 settings.companyRegistrationRazorpayAmountINR = 1;
+                settings.companyRegistrationGstPercent = 0;
                 await settings.save();
             }
             const envOverride = process.env.COMPANY_REGISTRATION_RAZORPAY_INR;
@@ -270,16 +319,31 @@ router.post('/create-order', async (req, res) => {
             amountINR: order.amount / 100,  // in INR (for frontend display)
             currency: order.currency,
             receipt: order.receipt,
-            keyId: process.env.RAZORPAY_KEY_ID,
+            keyId: razorpayKeyId || getRazorpayCredentials().keyId,
         });
     } catch (err) {
         console.error('[create-order] Error:', err);
 
-        // Razorpay API errors come with a structured error object
-        if (err.error && err.error.description) {
+        const statusCode = err.statusCode || err.status;
+        if (statusCode === 401) {
             return res.status(502).json({
                 ok: false,
-                error: 'Payment gateway error: ' + err.error.description,
+                error: razorpayAuthErrorMessage(),
+            });
+        }
+
+        // Razorpay API errors come with a structured error object
+        if (err.error && err.error.description) {
+            const desc = err.error.description;
+            if (/authentication failed/i.test(desc)) {
+                return res.status(502).json({
+                    ok: false,
+                    error: razorpayAuthErrorMessage(),
+                });
+            }
+            return res.status(502).json({
+                ok: false,
+                error: 'Payment gateway error: ' + desc,
             });
         }
 

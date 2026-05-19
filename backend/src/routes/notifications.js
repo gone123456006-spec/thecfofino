@@ -81,6 +81,7 @@ router.get('/my', userAuth, async (req, res) => {
       .lean();
 
     const userMax = await getUserMaxRegistrationStepIndex(req.userId, CompanyRegistration);
+
     const visible = list.filter((n) => {
       if (n.minStepIndex == null) return true;
       return userMax >= n.minStepIndex;

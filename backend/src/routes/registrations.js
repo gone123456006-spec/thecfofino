@@ -5,6 +5,20 @@ const CompanyRegistration = require('../models/CompanyRegistration');
 const auth = require('../middleware/auth');
 const userAuth = require('../middleware/userAuth');
 const config = require('../config');
+const { validateRegistrationPayload } = require('../utils/company-registration-validation');
+const { queueRegistrationEmails } = require('../services/registrationEmailService');
+
+function attachUserIdFromToken(req, data) {
+    const header = req.headers['authorization'] || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    if (!token) return;
+    try {
+        const decoded = jwt.verify(token, config.jwt.secret);
+        if (decoded.userId && !data.userId) data.userId = decoded.userId;
+    } catch {
+        /* ignore invalid token */
+    }
+}
 
 // POST /api/registrations — accept submission from mobile app (public); optional Authorization links to user
 router.post('/', async (req, res) => {
@@ -13,18 +27,11 @@ router.post('/', async (req, res) => {
         if (!data.businessType || !data.proposedName1) {
             return res.status(400).json({ ok: false, error: 'businessType and proposedName1 are required' });
         }
-        const header = req.headers['authorization'] || '';
-        const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-        console.log('Registration received: Has header:', !!header, 'Has token:', !!token);
-        if (token) {
-            try {
-                const decoded = jwt.verify(token, config.jwt.secret);
-                console.log('Registration decoded token:', decoded);
-                if (decoded.userId) data.userId = decoded.userId;
-            } catch (err) {
-                console.log('Registration token verify failed:', err.message);
-            }
+        const validationError = validateRegistrationPayload(data);
+        if (validationError) {
+            return res.status(400).json({ ok: false, error: validationError });
         }
+        attachUserIdFromToken(req, data);
         const registration = new CompanyRegistration(data);
         if (data.directors && Array.isArray(data.directors)) {
             data.directors.forEach((d, i) => {
@@ -32,6 +39,7 @@ router.post('/', async (req, res) => {
             });
         }
         await registration.save();
+        queueRegistrationEmails(registration._id);
         res.status(201).json({ ok: true, id: registration._id, caseId: registration.caseId });
     } catch (err) {
         console.error('Registration error:', err);
@@ -52,6 +60,11 @@ router.put('/:id', async (req, res) => {
         delete data._id;
         delete data.caseId;
 
+        const validationError = validateRegistrationPayload({ ...registration.toObject(), ...data });
+        if (validationError) {
+            return res.status(400).json({ ok: false, error: validationError });
+        }
+
         console.log('UPDATE Registration body keys:', Object.keys(data));
         if (data.directors && Array.isArray(data.directors)) {
             data.directors.forEach((d, i) => {
@@ -62,8 +75,16 @@ router.put('/:id', async (req, res) => {
             delete data.directors;
         }
 
+        if (!registration.userId) {
+            const link = {};
+            attachUserIdFromToken(req, link);
+            if (link.userId) registration.userId = link.userId;
+        }
+
         Object.assign(registration, data);
         await registration.save();
+
+        queueRegistrationEmails(registration._id);
 
         res.status(200).json({ ok: true, id: registration._id, caseId: registration.caseId });
     } catch (err) {
@@ -94,6 +115,24 @@ router.get('/my', userAuth, async (req, res) => {
             );
         }
         const list = await q;
+
+        // Link orphan filings to the logged-in user so emails can use their login Gmail.
+        const orphanIds = list.filter((r) => !r.userId).map((r) => r._id);
+        if (orphanIds.length > 0) {
+            await CompanyRegistration.updateMany(
+                { _id: { $in: orphanIds }, $or: [{ userId: null }, { userId: { $exists: false } }] },
+                { $set: { userId: req.userId } },
+            );
+            list.forEach((r) => {
+                if (!r.userId) r.userId = req.userId;
+            });
+        }
+
+        for (const item of list) {
+            const st = String(item.status || '').toLowerCase();
+            const ended = st === 'approved' || st === 'rejected';
+            if (!ended) queueRegistrationEmails(item._id);
+        }
         res.json({ ok: true, registrations: list });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });
@@ -216,6 +255,9 @@ router.patch('/:id/status', auth, async (req, res) => {
             { new: true }
         );
         if (!reg) return res.status(404).json({ ok: false, error: 'Not found' });
+
+        queueRegistrationEmails(reg._id);
+
         res.json({ ok: true, registration: reg });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });
@@ -239,6 +281,9 @@ router.patch('/:id/payment', auth, async (req, res) => {
             { new: true }
         );
         if (!reg) return res.status(404).json({ ok: false, error: 'Not found' });
+
+        queueRegistrationEmails(reg._id);
+
         res.json({ ok: true, registration: reg });
     } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

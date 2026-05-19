@@ -28,7 +28,18 @@ async function getUserMaxRegistrationStepIndex(userId, CompanyRegistration) {
   return maxStepIndexFromRegistration(reg);
 }
 
+/** True when user has at least one registration and every one is approved, completed, or rejected. */
+async function areAllRegistrationsTrackingEnded(userId, CompanyRegistration) {
+  const regs = await CompanyRegistration.find({ userId }).select('status').lean();
+  if (!regs.length) return false;
+  return regs.every((r) => {
+    const st = String(r.status || '').toLowerCase();
+    return st === 'approved' || st === 'completed' || st === 'rejected';
+  });
+}
+
 module.exports = {
   maxStepIndexFromRegistration,
   getUserMaxRegistrationStepIndex,
+  areAllRegistrationsTrackingEnded,
 };
