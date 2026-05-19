@@ -13,7 +13,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PLAY_STORE_LISTING_URL } from '@/constants/publishing';
 
-const PROFILE_IMAGE_KEY = '@finovert_auth_profile_image';
+const LEGACY_PROFILE_IMAGE_KEY = '@finovert_auth_profile_image';
+import {
+  getProfileImageForUser,
+  saveProfileImageForUser,
+} from '@/utils/profile-image-storage';
+import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner';
 
 const CONTACT_EMAIL = 'support@finovert.com';
 
@@ -118,25 +123,40 @@ const androidVersionCode =
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, logout, updateProfile } = useAuth();
+  const { user, logout, updateProfile, sessionGeneration } = useAuth();
   const { unreadCount } = useNotifications();
   const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
+  const [profileImageVersion, setProfileImageVersion] = useState(0);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
 
   const initial = user?.name?.trim().charAt(0).toUpperCase() ?? '?';
 
-  useEffect(() => {
-    (async () => {
+  const loadProfileImage = useCallback(async () => {
+    let uri = await getProfileImageForUser(user?.id, user?.email);
+    if (!uri && (user?.id || user?.email)) {
       try {
-        const uri = await AsyncStorage.getItem(PROFILE_IMAGE_KEY);
-        if (uri) setProfileImageUri(uri);
+        const legacy = await AsyncStorage.getItem(LEGACY_PROFILE_IMAGE_KEY);
+        if (legacy) {
+          uri = await saveProfileImageForUser(legacy, user.id, user.email);
+          await AsyncStorage.removeItem(LEGACY_PROFILE_IMAGE_KEY);
+        }
       } catch {
-        // ignore
+        /* ignore */
       }
-    })();
-  }, []);
+    }
+    setProfileImageUri(uri);
+    if (uri) setProfileImageVersion(v => v + 1);
+  }, [user?.id, user?.email]);
+
+  useEffect(() => {
+    void loadProfileImage();
+  }, [loadProfileImage, sessionGeneration]);
 
   const pickImage = useCallback(async () => {
+    if (!user?.id && !user?.email) {
+      Alert.alert('Sign in required', 'Complete your profile before adding a photo.');
+      return;
+    }
     try {
       const result = await pickVisualMediaFromLibrary({
         allowsEditing: true,
@@ -149,13 +169,16 @@ export default function ProfileScreen() {
           Alert.alert('Images only', 'Please choose a photo (not a video) for your profile picture.');
           return;
         }
-        setProfileImageUri(asset.uri);
-        await AsyncStorage.setItem(PROFILE_IMAGE_KEY, asset.uri);
+        const saved = await saveProfileImageForUser(asset.uri, user.id, user.email);
+        if (saved) {
+          setProfileImageUri(saved);
+          setProfileImageVersion(v => v + 1);
+        }
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Could not pick image. Try again.');
     }
-  }, []);
+  }, [user?.id, user?.email]);
 
   const handleProfileUpdate = async (name: string, mobile: string) => {
     await updateProfile({ name, mobile });
@@ -171,11 +194,7 @@ export default function ProfileScreen() {
 
   return (
     <>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        {/* ── App bar: Profile title + notification ───── */}
+      <View style={styles.container}>
         <View style={[styles.appBar, { paddingTop: Math.max(insets.top, 4) + 8 }]}>
           <Text style={styles.appBarTitle}>Profile</Text>
           <View style={styles.appBarSpacer} />
@@ -192,11 +211,20 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}>
         {/* ── User section: avatar left, name + details right ─────────────── */}
         <View style={styles.userSection}>
           <Pressable onPress={pickImage} style={styles.avatar}>
             {profileImageUri ? (
-              <Image source={{ uri: profileImageUri }} style={styles.avatarImage} resizeMode="cover" />
+              <Image
+                key={`avatar-${user?.id ?? user?.email ?? 'u'}-${profileImageVersion}`}
+                source={{ uri: profileImageUri }}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
             ) : (
               <Text style={styles.avatarText}>{initial}</Text>
             )}
@@ -252,6 +280,7 @@ export default function ProfileScreen() {
           <Text style={styles.sectionTitle}>Legal & Support</Text>
           <Text style={styles.sectionSubtitle}>Terms, privacy, contact and feedback</Text>
           <View style={styles.card}>
+            <UpdateAvailableBanner variant="row" />
             <Pressable style={styles.listRow} onPress={openTerms}>
               <View style={styles.listRowIcon}>
                 <Ionicons name="document-text-outline" size={22} color={Colors.primary} />
@@ -337,10 +366,9 @@ export default function ProfileScreen() {
 
         {/* ── Log out ──────────────────────────────────────────────────────── */}
         <Pressable
-          onPress={async () => {
-            await AsyncStorage.removeItem(PROFILE_IMAGE_KEY);
+          onPress={() => {
             setProfileImageUri(null);
-            logout();
+            void logout();
           }}
           style={styles.logoutBtn}>
           <Text style={styles.logoutText}>Log out</Text>
@@ -357,7 +385,8 @@ export default function ProfileScreen() {
             {androidVersionCode != null ? ` · Build ${androidVersionCode}` : ''}
           </Text>
         </View>
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       <EditProfileModal 
         visible={isEditModalVisible}

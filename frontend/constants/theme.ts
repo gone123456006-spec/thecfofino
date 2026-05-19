@@ -43,6 +43,17 @@ export const Colors = {
   white: '#ffffff',
   black: '#000000',
 
+  // Google Material (sign-in UI)
+  googleBlue: '#1A73E8',
+  googleBlueDark: '#1765CC',
+  googleGray: '#5F6368',
+  googleGrayLight: '#80868B',
+  googleBorder: '#DADCE0',
+  googleBg: '#F0F4F9',
+  googleCardBg: '#FFFFFF',
+  googleGreen: '#34A853',
+  googleRed: '#EA4335',
+
   // Dark gradient (brand colours, dark → light)
   gradientDark: '#002a40',
   gradientMid: '#003d5c',

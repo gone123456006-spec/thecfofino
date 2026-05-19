@@ -22,6 +22,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { preloadServiceImages } from '@/utils/preload-service-images';
 
 function NotificationsHeaderLeft() {
   const router = useRouter();
@@ -112,7 +113,8 @@ function RootLayoutContent() {
     );
   }
 
-  const needsProfile = !user.name || !user.mobile;
+  const mobileDigits = user.mobile?.replace(/\D/g, '').slice(-10) ?? '';
+  const needsProfile = !user.name?.trim() || !/^[6-9]\d{9}$/.test(mobileDigits);
   if (needsProfile) {
     return (
       <>
@@ -140,11 +142,11 @@ function RootLayoutContent() {
         <Stack.Screen
           name="booking-call"
           options={{
-            title: 'Book Your Call',
+            title: 'Book a call',
             headerLeft: () => <NotificationsHeaderLeft />,
             headerShadowVisible: false,
-            headerStyle: { backgroundColor: Colors.background },
-            headerTitleStyle: { fontWeight: '700', fontSize: ms(18), color: Colors.textPrimary },
+            headerStyle: { backgroundColor: '#f8f9fa' },
+            headerTitleStyle: { fontWeight: '500', fontSize: ms(18), color: '#202124' },
           }}
         />
         <Stack.Screen
@@ -209,7 +211,7 @@ function RootLayoutContent() {
         <Stack.Screen
           name="company-registration-review-paywall"
           options={{
-            title: 'Review & Payment',
+            title: 'Review & payment',
             headerTitleAlign: 'left',
             headerLeft: () => <NotificationsHeaderLeft />,
             headerShadowVisible: false,
@@ -258,6 +260,10 @@ function RootLayoutContent() {
 }
 
 export default function RootLayout() {
+  useEffect(() => {
+    void preloadServiceImages();
+  }, []);
+
   return (
     <SafeAreaProvider>
       <ErrorBoundary>

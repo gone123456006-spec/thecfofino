@@ -138,8 +138,8 @@ export default function CompanyRegistrationTrackingDetailScreen() {
             setRefreshing(true);
             void load(true);
           }}
-          colors={[Colors.primary]}
-          tintColor={Colors.primary}
+          colors={['#1a73e8']}
+          tintColor="#1a73e8"
         />
       }>
       {ended ? (
@@ -162,19 +162,26 @@ export default function CompanyRegistrationTrackingDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.surface },
-  content: { padding: 20, paddingBottom: 40 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
-  title: { fontSize: 20, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.3 },
-  muted: { fontSize: 15, fontWeight: '400', color: Colors.textMuted, textAlign: 'center', lineHeight: 21 },
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 10,
+    backgroundColor: '#f8f9fa',
+  },
+  title: { fontSize: 20, fontWeight: '500', color: '#202124' },
+  muted: { fontSize: 14, fontWeight: '400', color: '#5f6368', textAlign: 'center', lineHeight: 20 },
   btn: {
     marginTop: 16,
-    backgroundColor: Colors.primary,
+    backgroundColor: '#1a73e8',
     paddingHorizontal: 22,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: 8,
   },
-  btnText: { color: Colors.textOnPrimary, fontWeight: '600', fontSize: 17 },
-  linkRow: { marginTop: 20, alignSelf: 'center', paddingVertical: 8 },
-  linkText: { fontSize: 17, fontWeight: '500', color: Colors.primary },
+  btnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  linkRow: { marginTop: 16, alignSelf: 'center', paddingVertical: 14 },
+  linkText: { fontSize: 14, fontWeight: '600', color: '#1a73e8' },
 });

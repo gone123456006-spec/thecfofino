@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -19,6 +20,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+
+const WINDOW_H = Dimensions.get('window').height;
+/** Fixed height so ScrollView always scrolls when content overflows. */
+const RECHECK_LIST_HEIGHT = Math.round(Math.min(WINDOW_H * 0.36, 280));
 
 import {
   submitCompanyRegistrationToBackend,
@@ -34,7 +39,17 @@ import {
   saveCompanyRegistrationState,
   setCompanyRegistrationDraft,
 } from '@/utils/company-registration-draft';
+import { GoogleOutlinedField } from '@/components/GoogleOutlinedField';
 import { ms, sh } from '@/utils/responsive';
+import {
+  PAN_FORMAT_HINT,
+  sanitizeAadhaarInput,
+  sanitizeIndianMobileInput,
+  sanitizePanInput,
+  validateAadhaar,
+  validateCompanyMobile,
+  validatePan,
+} from '@/utils/company-registration-validation';
 
 type Director = {
   id: string;
@@ -238,6 +253,7 @@ export default function CompanyRegistrationFormScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [recheckVisible, setRecheckVisible] = useState(false);
   const [currentStatus, setCurrentStatus] = useState<string>('draft');
   const [serverStatus, setServerStatus] = useState<string | null>(null);
 
@@ -254,6 +270,9 @@ export default function CompanyRegistrationFormScreen() {
     const s = (serverStatus || currentStatus).toLowerCase();
     return STATUS_DISPLAY[s] || STATUS_DISPLAY['draft'];
   };
+
+  /** Company fields frozen after Case ID is generated (proposed names → capital structure). */
+  const companyDetailsLocked = Boolean(caseId);
 
   const openUploadModal = useCallback((target: UploadTarget) => {
     if (isPickingRef.current) return;
@@ -358,7 +377,8 @@ export default function CompanyRegistrationFormScreen() {
     if (!businessActivity.trim()) next.businessActivity = 'Required';
     if (!registeredAddress.trim()) next.registeredAddress = 'Required';
     if (!capitalStructure.trim()) next.capitalStructure = 'Required';
-    if (!companyMobile.trim()) next.companyMobile = 'Required';
+    const mobileErr = validateCompanyMobile(companyMobile);
+    if (mobileErr) next.companyMobile = mobileErr;
     if (!companyEmail.trim()) next.companyEmail = 'Required';
     return next;
   };
@@ -367,8 +387,10 @@ export default function CompanyRegistrationFormScreen() {
     const next = validateSectionA();
     directors.forEach((d) => {
       if (!d.name.trim()) next[directorErrorKey(d.id, 'name')] = 'Required';
-      if (!d.pan.trim()) next[directorErrorKey(d.id, 'pan')] = 'Required';
-      if (!d.aadhaar.trim()) next[directorErrorKey(d.id, 'aadhaar')] = 'Required';
+      const panErr = validatePan(d.pan);
+      if (panErr) next[directorErrorKey(d.id, 'pan')] = panErr;
+      const aadhaarErr = validateAadhaar(d.aadhaar);
+      if (aadhaarErr) next[directorErrorKey(d.id, 'aadhaar')] = aadhaarErr;
       if (!d.shareholding.trim()) next[directorErrorKey(d.id, 'shareholding')] = 'Required';
       if (!d.panFileUri) next[directorErrorKey(d.id, 'panFileUri')] = 'Required';
       if (!d.aadhaarFrontFileUri) next[directorErrorKey(d.id, 'aadhaarFrontFileUri')] = 'Required';
@@ -466,27 +488,56 @@ export default function CompanyRegistrationFormScreen() {
     proposedName1, proposedName2, proposedName3, businessActivity,
     registeredAddress, capitalStructure, companyMobile, companyEmail, directors]);
 
-  const handleNext = async () => {
+  const buildSectionADraft = useCallback(
+    () => ({
+      businessType: resolvedBusinessType,
+      proposedName1: proposedName1.trim(),
+      proposedName2: proposedName2.trim(),
+      proposedName3: proposedName3.trim(),
+      businessActivity: businessActivity.trim(),
+      registeredAddress: registeredAddress.trim(),
+      capitalStructure: capitalStructure.trim(),
+      companyMobile: companyMobile.trim(),
+      companyEmail: companyEmail.trim(),
+      directors: directors.map((d) => ({
+        id: d.id,
+        name: d.name.trim(),
+        pan: d.pan.trim(),
+        aadhaar: d.aadhaar.trim(),
+        shareholding: d.shareholding.trim(),
+        panFileUri: d.panFileUri,
+        aadhaarFrontFileUri: d.aadhaarFrontFileUri,
+        aadhaarBackFileUri: d.aadhaarBackFileUri,
+      })),
+    }),
+    [
+      resolvedBusinessType,
+      proposedName1,
+      proposedName2,
+      proposedName3,
+      businessActivity,
+      registeredAddress,
+      capitalStructure,
+      companyMobile,
+      companyEmail,
+      directors,
+    ],
+  );
+
+  const handleReviewNext = () => {
     const errs = validateSectionA();
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
       Alert.alert('Complete company details', 'Please fill all required company fields before continuing.');
       return;
     }
+    setRecheckVisible(true);
+  };
+
+  const handleConfirmRecheck = async () => {
     setIsSubmitting(true);
     try {
-      const draft = {
-        businessType: resolvedBusinessType,
-        proposedName1: proposedName1.trim(), proposedName2: proposedName2.trim(),
-        proposedName3: proposedName3.trim(), businessActivity: businessActivity.trim(),
-        registeredAddress: registeredAddress.trim(), capitalStructure: capitalStructure.trim(),
-        companyMobile: companyMobile.trim(), companyEmail: companyEmail.trim(),
-        directors: directors.map((d) => ({
-          id: d.id, name: d.name.trim(), pan: d.pan.trim(), aadhaar: d.aadhaar.trim(),
-          shareholding: d.shareholding.trim(), panFileUri: d.panFileUri,
-          aadhaarFrontFileUri: d.aadhaarFrontFileUri, aadhaarBackFileUri: d.aadhaarBackFileUri,
-        })),
-      };
+      const draft = buildSectionADraft();
       const token = await getToken();
       let result;
       if (mongoId) {
@@ -500,11 +551,25 @@ export default function CompanyRegistrationFormScreen() {
       const full = { ...draft, caseId: genCaseId ?? undefined, _id: (result.id || mongoId) ?? undefined };
       setCompanyRegistrationDraft(full);
       void saveCompanyRegistrationState({ draft: full, status: 'draft' });
+      setRecheckVisible(false);
+      setActiveSection('director');
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save section A');
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not generate Case ID. Try again.');
     }
     setIsSubmitting(false);
   };
+
+  const recheckRows = [
+    { label: 'Business type', value: resolvedBusinessType || '—' },
+    { label: 'Proposed name 1', value: proposedName1.trim() || '—' },
+    { label: 'Proposed name 2', value: proposedName2.trim() || '—' },
+    { label: 'Proposed name 3', value: proposedName3.trim() || '—' },
+    { label: 'Business activity', value: businessActivity.trim() || '—' },
+    { label: 'Registered address', value: registeredAddress.trim() || '—' },
+    { label: 'Company mobile', value: companyMobile.trim() ? `+91 ${companyMobile.trim()}` : '—' },
+    { label: 'Company email', value: companyEmail.trim() || '—' },
+    { label: 'Capital structure', value: capitalStructure.trim() || '—' },
+  ];
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
@@ -651,6 +716,72 @@ export default function CompanyRegistrationFormScreen() {
         </Pressable>
       </Modal>
 
+      <Modal
+        visible={recheckVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => !isSubmitting && setRecheckVisible(false)}
+      >
+        <View style={companyRegistrationFormStyles.recheckOverlay}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => !isSubmitting && setRecheckVisible(false)}
+            accessibilityLabel="Close review"
+          />
+          <View style={companyRegistrationFormStyles.recheckSheet}>
+            <View style={companyRegistrationFormStyles.recheckHandle} />
+            <View style={companyRegistrationFormStyles.recheckHeader}>
+              <Text style={companyRegistrationFormStyles.recheckTitle}>Review company details</Text>
+              <Text style={companyRegistrationFormStyles.recheckSubtitle}>
+                Check everything below. Your Case ID is created only after you confirm.
+              </Text>
+              <Text style={companyRegistrationFormStyles.recheckScrollHint}>
+                Swipe up or down to see all fields
+              </Text>
+            </View>
+            <ScrollView
+              style={[companyRegistrationFormStyles.recheckScroll, { height: RECHECK_LIST_HEIGHT }]}
+              contentContainerStyle={companyRegistrationFormStyles.recheckScrollContent}
+              showsVerticalScrollIndicator
+              persistentScrollbar={Platform.OS === 'android'}
+              nestedScrollEnabled
+              scrollEventThrottle={16}
+              bounces
+              alwaysBounceVertical
+              keyboardShouldPersistTaps="handled"
+            >
+              {recheckRows.map((row) => (
+                <View key={row.label} style={companyRegistrationFormStyles.recheckRow}>
+                  <Text style={companyRegistrationFormStyles.recheckRowLabel}>{row.label}</Text>
+                  <Text style={companyRegistrationFormStyles.recheckRowValue}>{row.value}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <View style={companyRegistrationFormStyles.recheckActions}>
+              <Pressable
+                style={[companyRegistrationFormStyles.nextButton, isSubmitting && companyRegistrationFormStyles.ctaButtonDisabled]}
+                onPress={handleConfirmRecheck}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={companyRegistrationFormStyles.nextButtonText}>Confirm & generate Case ID</Text>
+                )}
+              </Pressable>
+              <Pressable
+                style={companyRegistrationFormStyles.recheckBackBtn}
+                onPress={() => setRecheckVisible(false)}
+                disabled={isSubmitting}
+              >
+                <Text style={companyRegistrationFormStyles.recheckBackText}>Go back and edit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <KeyboardAvoidingView
         style={companyRegistrationFormStyles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -675,31 +806,102 @@ export default function CompanyRegistrationFormScreen() {
           )}
 
           <View style={companyRegistrationFormStyles.section}>
-            <Text style={companyRegistrationFormStyles.sectionTitle}>Section A – Company Details</Text>
+            <Text style={companyRegistrationFormStyles.sectionTitle}>Company details</Text>
+            <Text style={companyRegistrationFormStyles.sectionLead}>
+              {companyDetailsLocked
+                ? 'Company details below are locked to your Case ID. You can still add director information.'
+                : 'Enter your company information. Fields marked optional can be left blank.'}
+            </Text>
 
-            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Proposed Names (3)</Text>
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.proposedName1 && companyRegistrationFormStyles.inputError]} value={proposedName1} onChangeText={(v) => { setProposedName1(v); clearError('proposedName1'); }} placeholder="Proposed name 1" placeholderTextColor={Colors.textMuted} onFocus={() => setActiveSection('company')} />
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline]} value={proposedName2} onChangeText={setProposedName2} placeholder="Proposed name 2" placeholderTextColor={Colors.textMuted} />
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline]} value={proposedName3} onChangeText={setProposedName3} placeholder="Proposed name 3" placeholderTextColor={Colors.textMuted} />
+            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Proposed names</Text>
+            <GoogleOutlinedField
+              label="Proposed name 1"
+              value={proposedName1}
+              onChangeText={(v) => { setProposedName1(v); clearError('proposedName1'); }}
+              placeholder="Enter first choice name"
+              error={errors.proposedName1}
+              locked={companyDetailsLocked}
+              onFocus={() => setActiveSection('company')}
+            />
+            <GoogleOutlinedField
+              label="Proposed name 2"
+              value={proposedName2}
+              onChangeText={setProposedName2}
+              placeholder="Second choice (if any)"
+              optional={!companyDetailsLocked}
+              locked={companyDetailsLocked}
+            />
+            <GoogleOutlinedField
+              label="Proposed name 3"
+              value={proposedName3}
+              onChangeText={setProposedName3}
+              placeholder="Third choice (if any)"
+              optional={!companyDetailsLocked}
+              locked={companyDetailsLocked}
+            />
 
-            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Business Activity</Text>
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputMultiline, companyRegistrationFormStyles.inputNoOutline, errors.businessActivity && companyRegistrationFormStyles.inputError]} value={businessActivity} onChangeText={(v) => { setBusinessActivity(v); clearError('businessActivity'); }} placeholder="Describe your business activity" placeholderTextColor={Colors.textMuted} multiline />
+            <GoogleOutlinedField
+              label="Business activity"
+              value={businessActivity}
+              onChangeText={(v) => { setBusinessActivity(v); clearError('businessActivity'); }}
+              placeholder="Describe your business activity"
+              error={errors.businessActivity}
+              locked={companyDetailsLocked}
+              multiline
+              numberOfLines={3}
+            />
 
-            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Registered Address</Text>
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputMultiline, companyRegistrationFormStyles.inputNoOutline, errors.registeredAddress && companyRegistrationFormStyles.inputError]} value={registeredAddress} onChangeText={(v) => { setRegisteredAddress(v); clearError('registeredAddress'); }} placeholder="Full registered office address" placeholderTextColor={Colors.textMuted} multiline />
+            <GoogleOutlinedField
+              label="Registered address"
+              value={registeredAddress}
+              onChangeText={(v) => { setRegisteredAddress(v); clearError('registeredAddress'); }}
+              placeholder="Full registered office address"
+              error={errors.registeredAddress}
+              locked={companyDetailsLocked}
+              multiline
+              numberOfLines={3}
+            />
 
-            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Company Mobile Number</Text>
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.companyMobile && companyRegistrationFormStyles.inputError]} value={companyMobile} onChangeText={(v) => { setCompanyMobile(v); clearError('companyMobile'); }} placeholder="e.g. 9876543210" placeholderTextColor={Colors.textMuted} keyboardType="phone-pad" maxLength={10} />
+            <GoogleOutlinedField
+              label="Company mobile number"
+              value={companyMobile}
+              onChangeText={(v) => { setCompanyMobile(sanitizeIndianMobileInput(v)); clearError('companyMobile'); }}
+              placeholder="10-digit mobile (starts with 6–9)"
+              error={errors.companyMobile}
+              locked={companyDetailsLocked}
+              keyboardType="phone-pad"
+              maxLength={10}
+            />
 
-            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Company Email (Gmail ID)</Text>
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.companyEmail && companyRegistrationFormStyles.inputError]} value={companyEmail} onChangeText={(v) => { setCompanyEmail(v); clearError('companyEmail'); }} placeholder="e.g. company@gmail.com" placeholderTextColor={Colors.textMuted} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+            <GoogleOutlinedField
+              label="Company email"
+              value={companyEmail}
+              onChangeText={(v) => { setCompanyEmail(v); clearError('companyEmail'); }}
+              placeholder="e.g. company@gmail.com"
+              error={errors.companyEmail}
+              locked={companyDetailsLocked}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
-            <Text style={companyRegistrationFormStyles.sectionSubtitle}>Capital Structure</Text>
-            <TextInput style={[companyRegistrationFormStyles.input, companyRegistrationFormStyles.inputNoOutline, errors.capitalStructure && companyRegistrationFormStyles.inputError]} value={capitalStructure} onChangeText={(v) => { setCapitalStructure(v); clearError('capitalStructure'); }} placeholder="e.g. ₹1,00,000" placeholderTextColor={Colors.textMuted} keyboardType="numeric" />
+            <GoogleOutlinedField
+              label="Capital structure"
+              value={capitalStructure}
+              onChangeText={(v) => { setCapitalStructure(v); clearError('capitalStructure'); }}
+              placeholder="e.g. ₹1,00,000"
+              error={errors.capitalStructure}
+              locked={companyDetailsLocked}
+              keyboardType="numeric"
+            />
 
             {!caseId && (
-              <Pressable style={companyRegistrationFormStyles.nextButton} onPress={handleNext} disabled={isSubmitting || alreadySubmitted}>
-                <Text style={companyRegistrationFormStyles.nextButtonText}>Next</Text>
+              <Pressable
+                style={companyRegistrationFormStyles.nextButton}
+                onPress={handleReviewNext}
+                disabled={isSubmitting || alreadySubmitted}
+              >
+                <Text style={companyRegistrationFormStyles.nextButtonText}>Review & continue</Text>
                 <Ionicons name="arrow-forward" size={20} color="#fff" />
               </Pressable>
             )}
@@ -707,32 +909,37 @@ export default function CompanyRegistrationFormScreen() {
 
           {caseId && (
             <View style={companyRegistrationFormStyles.caseCard}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sh(12) }}>
-                <View>
-                  <Text style={companyRegistrationFormStyles.caseCardTitle}>Your Case ID</Text>
-                  <Text style={companyRegistrationFormStyles.caseIdText} selectable>{caseId}</Text>
+              <View style={companyRegistrationFormStyles.caseCardRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={companyRegistrationFormStyles.caseCardTitle}>Case ID</Text>
+                  <Text style={companyRegistrationFormStyles.caseIdText} selectable>
+                    {caseId}
+                  </Text>
                 </View>
-                {/* Registration Status Badge */}
-                <View style={{ 
-                  flexDirection: 'row', 
-                  alignItems: 'center', 
-                  gap: 6, 
-                  paddingHorizontal: 10, 
-                  paddingVertical: 5, 
-                  borderRadius: 20, 
-                  backgroundColor: getStatusDisplay().bg 
-                }}>
-                  <Ionicons name={getStatusDisplay().icon as any} size={14} color={getStatusDisplay().color} />
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: getStatusDisplay().color }}>{getStatusDisplay().label}</Text>
+                <View
+                  style={[
+                    companyRegistrationFormStyles.caseStatusChip,
+                    { backgroundColor: getStatusDisplay().bg },
+                  ]}>
+                  <Ionicons name={getStatusDisplay().icon as any} size={12} color={getStatusDisplay().color} />
+                  <Text
+                    style={[
+                      companyRegistrationFormStyles.caseStatusChipText,
+                      { color: getStatusDisplay().color },
+                    ]}>
+                    {getStatusDisplay().label}
+                  </Text>
                 </View>
               </View>
-              <Text style={companyRegistrationFormStyles.caseCardHint}>Complete director details below and submit. This case will appear in the dashboard.</Text>
+              <Text style={companyRegistrationFormStyles.caseCardHint}>
+                Add director details below, then submit.
+              </Text>
             </View>
           )}
 
           <View style={companyRegistrationFormStyles.section}>
             <View style={companyRegistrationFormStyles.sectionHeaderRow}>
-              <Text style={[companyRegistrationFormStyles.sectionTitle, companyRegistrationFormStyles.sectionTitleCompact]}>Section B – Director Details</Text>
+              <Text style={[companyRegistrationFormStyles.sectionTitle, companyRegistrationFormStyles.sectionTitleCompact]}>Director details</Text>
               <Pressable style={companyRegistrationFormStyles.addDirectorBtn} onPress={addDirector}>
                 <Ionicons name="add-circle" size={24} color={Colors.primary} />
                 <Text style={companyRegistrationFormStyles.addDirectorBtnText}>Add Director</Text>
@@ -750,28 +957,49 @@ export default function CompanyRegistrationFormScreen() {
                   )}
                 </View>
 
-                <Text style={companyRegistrationFormStyles.label}>Name</Text>
-                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'name')] && companyRegistrationFormStyles.inputError]} value={director.name} onChangeText={(v) => updateDirector(director.id, 'name', v)} placeholder="Director full name" placeholderTextColor={Colors.textMuted} onFocus={() => setActiveSection('director')} />
+                <GoogleOutlinedField
+                  label="Director name"
+                  value={director.name}
+                  onChangeText={(v) => updateDirector(director.id, 'name', v)}
+                  placeholder="Full name as on PAN"
+                  error={errors[directorErrorKey(director.id, 'name')]}
+                  onFocus={() => setActiveSection('director')}
+                  autoCapitalize="words"
+                />
 
-                <Text style={companyRegistrationFormStyles.label}>PAN</Text>
-                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'pan')] && companyRegistrationFormStyles.inputError]} value={director.pan} onChangeText={(v) => updateDirector(director.id, 'pan', v)} placeholder="PAN number" placeholderTextColor={Colors.textMuted} autoCapitalize="characters" maxLength={10} />
+                <GoogleOutlinedField
+                  label="PAN number"
+                  value={director.pan}
+                  onChangeText={(v) => updateDirector(director.id, 'pan', sanitizePanInput(v))}
+                  placeholder={PAN_FORMAT_HINT}
+                  error={errors[directorErrorKey(director.id, 'pan')]}
+                  autoCapitalize="characters"
+                  maxLength={10}
+                />
 
                 <Pressable style={[uploadStyles.uploadBtn, errors[directorErrorKey(director.id, 'panFileUri')] && uploadStyles.uploadBtnError, director.panFileUri ? uploadStyles.uploadBtnSuccess : null]} onPress={() => openUploadModal({ directorId: director.id, field: 'panFileUri', title: 'Upload PAN Card' })}>
-                  <Ionicons name={director.panFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.panFileUri ? '#fff' : Colors.primary} />
+                  <Ionicons name={director.panFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.panFileUri ? '#188038' : Colors.primary} />
                   <Text style={[uploadStyles.uploadBtnText, director.panFileUri ? uploadStyles.uploadBtnTextSuccess : null]}>{director.panFileUri ? 'PAN uploaded ✓' : 'Upload PAN (JPEG / PDF)'}</Text>
                 </Pressable>
                 {director.panFileUri && <Text style={uploadStyles.savedTag}>✔ Document saved</Text>}
 
-                <Text style={companyRegistrationFormStyles.label}>Aadhaar</Text>
-                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'aadhaar')] && companyRegistrationFormStyles.inputError]} value={director.aadhaar} onChangeText={(v) => updateDirector(director.id, 'aadhaar', v)} placeholder="Aadhaar number" placeholderTextColor={Colors.textMuted} keyboardType="number-pad" maxLength={12} />
+                <GoogleOutlinedField
+                  label="Aadhaar number"
+                  value={director.aadhaar}
+                  onChangeText={(v) => updateDirector(director.id, 'aadhaar', sanitizeAadhaarInput(v))}
+                  placeholder="12-digit Aadhaar number"
+                  error={errors[directorErrorKey(director.id, 'aadhaar')]}
+                  keyboardType="number-pad"
+                  maxLength={12}
+                />
 
                 <Pressable style={[uploadStyles.uploadBtn, errors[directorErrorKey(director.id, 'aadhaarFrontFileUri')] && uploadStyles.uploadBtnError, director.aadhaarFrontFileUri ? uploadStyles.uploadBtnSuccess : null]} onPress={() => openUploadModal({ directorId: director.id, field: 'aadhaarFrontFileUri', title: 'Upload Aadhaar (Front)' })}>
-                  <Ionicons name={director.aadhaarFrontFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.aadhaarFrontFileUri ? '#fff' : Colors.primary} />
+                  <Ionicons name={director.aadhaarFrontFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.aadhaarFrontFileUri ? '#188038' : Colors.primary} />
                   <Text style={[uploadStyles.uploadBtnText, director.aadhaarFrontFileUri ? uploadStyles.uploadBtnTextSuccess : null]}>{director.aadhaarFrontFileUri ? 'Aadhaar (Front) uploaded ✓' : 'Upload Aadhaar Front (JPEG / PDF)'}</Text>
                 </Pressable>
 
                 <Pressable style={[uploadStyles.uploadBtn, errors[directorErrorKey(director.id, 'aadhaarBackFileUri')] && uploadStyles.uploadBtnError, director.aadhaarBackFileUri ? uploadStyles.uploadBtnSuccess : null, { marginTop: sh(8) }]} onPress={() => openUploadModal({ directorId: director.id, field: 'aadhaarBackFileUri', title: 'Upload Aadhaar (Back)' })}>
-                  <Ionicons name={director.aadhaarBackFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.aadhaarBackFileUri ? '#fff' : Colors.primary} />
+                  <Ionicons name={director.aadhaarBackFileUri ? 'checkmark-circle' : 'cloud-upload-outline'} size={22} color={director.aadhaarBackFileUri ? '#188038' : Colors.primary} />
                   <Text style={[uploadStyles.uploadBtnText, director.aadhaarBackFileUri ? uploadStyles.uploadBtnTextSuccess : null]}>{director.aadhaarBackFileUri ? 'Aadhaar (Back) uploaded ✓' : 'Upload Aadhaar Back (JPEG / PDF)'}</Text>
                 </Pressable>
 
@@ -779,8 +1007,14 @@ export default function CompanyRegistrationFormScreen() {
                   <Text style={uploadStyles.savedTag}>✔ Documents saved locally</Text>
                 )}
 
-                <Text style={companyRegistrationFormStyles.label}>Shareholding %</Text>
-                <TextInput style={[companyRegistrationFormStyles.input, errors[directorErrorKey(director.id, 'shareholding')] && companyRegistrationFormStyles.inputError]} value={director.shareholding} onChangeText={(v) => updateDirector(director.id, 'shareholding', v)} placeholder="e.g. 50" placeholderTextColor={Colors.textMuted} keyboardType="decimal-pad" />
+                <GoogleOutlinedField
+                  label="Shareholding %"
+                  value={director.shareholding}
+                  onChangeText={(v) => updateDirector(director.id, 'shareholding', v)}
+                  placeholder="e.g. 50"
+                  error={errors[directorErrorKey(director.id, 'shareholding')]}
+                  keyboardType="decimal-pad"
+                />
               </View>
             ))}
           </View>
@@ -801,7 +1035,7 @@ export default function CompanyRegistrationFormScreen() {
             disabled={!caseId || !confirmedDisclaimer || isSubmitting || alreadySubmitted}
           >
             <Text style={companyRegistrationFormStyles.ctaButtonText}>
-              {alreadySubmitted ? 'ALREADY SUBMITTED' : caseId ? 'SUBMIT TO DASHBOARD' : 'SUBMIT'}
+              {alreadySubmitted ? 'Already submitted' : caseId ? 'Submit your details' : 'Submit'}
             </Text>
           </Pressable>
         </ScrollView>
@@ -824,10 +1058,10 @@ const uploadStyles = StyleSheet.create({
   optionDesc: { fontSize: 12, color: '#6b7280' },
   cancelBtn: { marginTop: 6, paddingVertical: 14, alignItems: 'center', borderRadius: 12, backgroundColor: '#f3f4f6' },
   cancelText: { fontSize: 15, fontWeight: '600', color: '#6b7280' },
-  uploadBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1.5, borderColor: '#3b82f6', borderStyle: 'dashed', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 6, backgroundColor: '#eff6ff' },
-  uploadBtnError: { borderColor: '#ef4444', backgroundColor: '#fef2f2' },
-  uploadBtnSuccess: { borderStyle: 'solid', borderColor: '#22c55e', backgroundColor: '#22c55e' },
-  uploadBtnText: { fontSize: 14, fontWeight: '500', color: '#3b82f6' },
-  uploadBtnTextSuccess: { color: '#fff' },
+  uploadBtn: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#B8D4E8', borderRadius: 8, paddingVertical: 14, paddingHorizontal: 14, marginBottom: 6, backgroundColor: '#F5F7FA', minHeight: 52 },
+  uploadBtnError: { borderColor: '#d93025', backgroundColor: '#FEF7F7' },
+  uploadBtnSuccess: { borderColor: '#188038', backgroundColor: '#e6f4ea' },
+  uploadBtnText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
+  uploadBtnTextSuccess: { color: '#188038' },
   savedTag: { fontSize: 12, color: '#22c55e', marginTop: 2, marginBottom: 8, marginLeft: 4 },
 });

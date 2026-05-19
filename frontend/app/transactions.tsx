@@ -1,13 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSyncRegistrationAutoNotifications } from '@/hooks/useSyncRegistrationAutoNotifications';
 import {
   ActivityIndicator,
   Pressable,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
@@ -16,8 +15,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { fetchMyRegistrationsSummary, type MyRegistrationItem } from '@/api/company-registration';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
-
-const HAIR = StyleSheet.hairlineWidth;
+import { createTransactionsStyles } from '@/styles/transactions.styles';
+import { useScalers } from '@/utils/responsive';
+import {
+  clearRegistrationsCache,
+  getCachedPaidRegistrations,
+  registrationsCacheUserKey,
+  setCachedRegistrations,
+} from '@/utils/registrations-cache';
 
 function formatMethod(method?: string): string {
   if (!method?.trim()) return 'Online';
@@ -32,14 +37,15 @@ function paidTimestamp(item: MyRegistrationItem): number {
   return new Date(item.createdAt).getTime();
 }
 
-function formatWhen(iso: string | undefined): string {
+function paidIso(item: MyRegistrationItem): string {
+  return item.paidAt || item.updatedAt || item.createdAt;
+}
+
+function formatActivityTime(iso: string | undefined): string {
   if (!iso) return '';
   try {
     const d = new Date(iso);
     return d.toLocaleString(undefined, {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -48,55 +54,52 @@ function formatWhen(iso: string | undefined): string {
   }
 }
 
-function paymentMessage(item: MyRegistrationItem): { title: string; body: string } {
-  const name = item.proposedName1?.trim() || 'Your application';
-  const caseLine = item.caseId ? `Case ${item.caseId}` : null;
-  const amt = item.paymentAmount != null && item.paymentAmount > 0 ? item.paymentAmount : null;
-  const amountDisplay = amt != null ? `₹${amt.toLocaleString('en-IN')}` : null;
-  const method = formatMethod(item.paymentMethod);
-  const when = formatWhen(item.paidAt || item.updatedAt || item.createdAt);
+function activityGroupLabel(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((dayStart(now) - dayStart(d)) / 86400000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+}
 
-  if (item.paymentStatus === 'partial') {
-    return {
-      title: 'Partial payment received',
-      body:
-        `${amountDisplay ? `${amountDisplay} recorded ` : 'A payment was recorded '}for company registration (${name}).` +
-        (caseLine ? ` ${caseLine}.` : '') +
-        (when ? ` ${when}.` : '') +
-        ` Via ${method}.`,
-    };
-  }
+function activityTitle(item: MyRegistrationItem): string {
+  if (item.paymentStatus === 'partial') return 'Partial payment';
+  return 'Payment received';
+}
 
-  return {
-    title: 'Payment received',
-    body:
-      `Thank you — we received ${amountDisplay ? `${amountDisplay} ` : 'your payment '}for company registration: ${name}.` +
-      (caseLine ? ` ${caseLine}.` : '') +
-      (when ? ` ${when}.` : '') +
-      ` Paid via ${method}.`,
-  };
+function activitySubtitle(item: MyRegistrationItem): string {
+  const name = item.proposedName1?.trim() || 'Company registration';
+  const caseLine = item.caseId ? ` · ${item.caseId}` : '';
+  return `${name}${caseLine} · ${formatMethod(item.paymentMethod)}`;
 }
 
 export default function TransactionsScreen() {
   const router = useRouter();
-  const { getToken } = useAuth();
+  const scalers = useScalers();
+  const styles = useMemo(() => createTransactionsStyles(scalers), [scalers]);
+  const { getToken, sessionGeneration, user } = useAuth();
   const syncRegistrationAutoNotifications = useSyncRegistrationAutoNotifications();
-  const [rows, setRows] = useState<MyRegistrationItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const regUserKey = registrationsCacheUserKey(user);
+  const [rows, setRows] = useState<MyRegistrationItem[]>(() => getCachedPaidRegistrations(regUserKey));
+  const [loading, setLoading] = useState(() => getCachedPaidRegistrations(regUserKey).length === 0);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
     async (silent = false) => {
       try {
-        if (!silent) setLoading(true);
+        const userKey = registrationsCacheUserKey(user);
+        if (!silent && getCachedPaidRegistrations(userKey).length === 0) setLoading(true);
         setError(null);
         const token = await getToken();
         if (!token) {
-          setRows([]);
+          if (!silent) setRows([]);
           return;
         }
         const list = await fetchMyRegistrationsSummary(token);
+        setCachedRegistrations(userKey, list);
         syncRegistrationAutoNotifications(list);
         const paid = list
           .filter((r) => r.paymentStatus === 'paid' || r.paymentStatus === 'partial')
@@ -104,32 +107,54 @@ export default function TransactionsScreen() {
         setRows(paid);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Could not load transactions.');
-        setRows([]);
+        if (!silent) {
+          setRows((prev) => (prev.length > 0 ? prev : []));
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [getToken, syncRegistrationAutoNotifications],
+    [getToken, syncRegistrationAutoNotifications, user?.email, user?.id],
   );
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load]),
+      const userKey = registrationsCacheUserKey(user);
+      const cachedPaid = getCachedPaidRegistrations(userKey);
+      if (cachedPaid.length > 0) {
+        setRows(cachedPaid);
+        setLoading(false);
+      }
+      void load(cachedPaid.length > 0);
+    }, [load, user?.id, user?.email]),
   );
 
-  const emptyHint = useMemo(
-    () =>
-      'When you complete a payment (for example company registration), a confirmation message will appear here.',
-    [],
-  );
+  useEffect(() => {
+    clearRegistrationsCache();
+    const cachedPaid = getCachedPaidRegistrations(registrationsCacheUserKey(user));
+    setRows(cachedPaid);
+    setLoading(cachedPaid.length === 0);
+    setError(null);
+    void load(cachedPaid.length > 0);
+  }, [sessionGeneration, user?.email]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, MyRegistrationItem[]>();
+    for (const item of rows) {
+      const label = activityGroupLabel(paidIso(item));
+      const list = map.get(label) ?? [];
+      list.push(item);
+      map.set(label, list);
+    }
+    return Array.from(map.entries());
+  }, [rows]);
 
   if (loading && rows.length === 0) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.muted}>Loading…</Text>
+        <Text style={styles.muted}>Loading activity…</Text>
       </View>
     );
   }
@@ -146,99 +171,94 @@ export default function TransactionsScreen() {
             setRefreshing(true);
             void load(true);
           }}
-          colors={[Colors.primary]}
-          tintColor={Colors.primary}
+          colors={['#1a73e8']}
+          tintColor="#1a73e8"
         />
       }>
-      <Text style={styles.title}>Payment activity</Text>
-      <Text style={styles.subtitle}>Confirmations for payments made in the app.</Text>
+      <Text style={styles.pageSub}>Confirmations for payments made in the app.</Text>
+
+      {rows.length > 0 ? (
+        <View style={styles.summaryChip}>
+          <Text style={styles.summaryChipText}>
+            {rows.length} payment{rows.length === 1 ? '' : 's'}
+          </Text>
+        </View>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       {rows.length === 0 && !error ? (
-        <View style={styles.empty}>
-          <Ionicons name="receipt-outline" size={40} color={Colors.textMuted} />
-          <Text style={styles.emptyTitle}>No payments yet</Text>
-          <Text style={styles.emptyBody}>{emptyHint}</Text>
-        </View>
-      ) : null}
-
-      {rows.map((item) => {
-        const { title, body } = paymentMessage(item);
-        return (
-          <View key={item._id} style={styles.card}>
-            <View style={styles.cardTop}>
-              <View style={styles.iconWrap}>
-                <Ionicons name="checkmark-circle" size={22} color={Colors.primary} />
-              </View>
-              <View style={styles.cardTextCol}>
-                <Text style={styles.cardTitle}>{title}</Text>
-                <Text style={styles.cardBody}>{body}</Text>
-              </View>
-            </View>
-            {item.paymentReference ? (
-              <Text style={styles.ref}>Reference: {item.paymentReference}</Text>
-            ) : null}
-            <Pressable
-              style={({ pressed }) => [styles.linkRow, pressed && { opacity: 0.72 }]}
-              onPress={() => router.push(`/company-registration-tracking/${item._id}` as any)}>
-              <Text style={styles.linkText}>View filing</Text>
-              <Ionicons name="chevron-forward" size={18} color={Colors.primary} />
-            </Pressable>
+        <View style={styles.emptyCard}>
+          <View style={styles.emptyIconWrap}>
+            <Ionicons name="receipt-outline" size={28} color="#5f6368" />
           </View>
-        );
-      })}
+          <Text style={styles.emptyTitle}>No payment activity</Text>
+          <Text style={styles.emptyBody}>
+            When you complete a payment for company registration, it will show here — like your
+            Google account activity.
+          </Text>
+        </View>
+      ) : (
+        <View style={styles.googleCard}>
+          {grouped.map(([label, items], groupIndex) => (
+            <View key={label}>
+              {groupIndex > 0 ? <View style={styles.dividerFull} /> : null}
+              <Text style={[styles.sectionLabel, groupIndex === 0 && styles.sectionLabelFirst]}>
+                {label.toUpperCase()}
+              </Text>
+              {items.map((item, index) => {
+                const amt =
+                  item.paymentAmount != null && item.paymentAmount > 0
+                    ? item.paymentAmount
+                    : null;
+                const isPartial = item.paymentStatus === 'partial';
+                return (
+                  <View key={item._id}>
+                    {index > 0 ? <View style={styles.dividerInset} /> : null}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.activityRow,
+                        pressed && styles.activityRowPressed,
+                      ]}
+                      onPress={() =>
+                        router.push(`/company-registration-tracking/${item._id}` as any)
+                      }
+                      accessibilityRole="button"
+                      accessibilityLabel={`${activityTitle(item)}, ${activitySubtitle(item)}`}>
+                      <View style={isPartial ? styles.iconWrapPartial : styles.iconWrapSuccess}>
+                        <Ionicons
+                          name={isPartial ? 'ellipse-outline' : 'checkmark-circle'}
+                          size={22}
+                          color={isPartial ? '#b06000' : '#188038'}
+                        />
+                      </View>
+                      <View style={styles.activityBody}>
+                        <Text style={styles.activityTitle}>{activityTitle(item)}</Text>
+                        <Text style={styles.activityMeta} numberOfLines={2}>
+                          {activitySubtitle(item)}
+                        </Text>
+                        <Text style={styles.activityTime}>
+                          {formatActivityTime(paidIso(item))}
+                          {item.paymentReference
+                            ? ` · Ref ${item.paymentReference.slice(0, 12)}${item.paymentReference.length > 12 ? '…' : ''}`
+                            : ''}
+                        </Text>
+                      </View>
+                      {amt != null ? (
+                        <View style={styles.amountCol}>
+                          <Text style={[styles.amountText, isPartial && styles.amountPartial]}>
+                            ₹{amt.toLocaleString('en-IN')}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      )}
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: Colors.surface },
-  content: { padding: 20, paddingBottom: 40 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: Colors.surface },
-  muted: { fontSize: 15, color: Colors.textMuted },
-  title: {
-    fontSize: 28,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-    letterSpacing: -0.6,
-    marginBottom: 6,
-  },
-  subtitle: { fontSize: 15, fontWeight: '400', color: Colors.textMuted, lineHeight: 20, marginBottom: 20 },
-  error: { fontSize: 14, color: '#b42318', marginBottom: 12 },
-  empty: { alignItems: 'center', paddingVertical: 36, gap: 10, paddingHorizontal: 8 },
-  emptyTitle: { fontSize: 17, fontWeight: '600', color: Colors.textSecondary },
-  emptyBody: { fontSize: 14, fontWeight: '400', color: Colors.textMuted, textAlign: 'center', lineHeight: 20 },
-  card: {
-    backgroundColor: Colors.white,
-    borderRadius: 14,
-    borderWidth: HAIR,
-    borderColor: Colors.borderLight,
-    padding: 16,
-    marginBottom: 12,
-  },
-  cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: Colors.surfaceLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardTextCol: { flex: 1, minWidth: 0 },
-  cardTitle: { fontSize: 17, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.2, marginBottom: 6 },
-  cardBody: { fontSize: 15, fontWeight: '400', color: Colors.textSecondary, lineHeight: 22 },
-  ref: { fontSize: 12, fontWeight: '400', color: Colors.textMuted, marginTop: 12 },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 4,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: HAIR,
-    borderTopColor: Colors.divider,
-  },
-  linkText: { fontSize: 15, fontWeight: '600', color: Colors.primary },
-});

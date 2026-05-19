@@ -2,8 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { submitBookingToBackend } from '@/api/booking';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationsContext';
-import { Colors } from '@/constants/theme';
-import { bookingStyles } from '@/styles/booking.styles';
+import { bookingStyles as s } from '@/styles/booking.styles';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -24,6 +23,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+const PURPOSE_CHIPS = [
+  'Company registration',
+  'GST & compliance',
+  'Tax consultation',
+  'Accounting',
+  'General enquiry',
+] as const;
+
 export default function BookingCallScreen() {
   const { user } = useAuth();
   const { addNotification } = useNotifications();
@@ -35,7 +42,6 @@ export default function BookingCallScreen() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Green tick animation when booking succeeds
   const tickScale = useSharedValue(0);
   const tickOpacity = useSharedValue(0);
   const ringScale = useSharedValue(0.5);
@@ -51,15 +57,15 @@ export default function BookingCallScreen() {
     }
     ringScale.value = withSequence(
       withSpring(1.2, { damping: 12, stiffness: 120 }),
-      withSpring(1, { damping: 14 })
+      withSpring(1, { damping: 14 }),
     );
     ringOpacity.value = withSequence(
       withTiming(0.4, { duration: 200 }),
-      withDelay(600, withTiming(0, { duration: 400 }))
+      withDelay(600, withTiming(0, { duration: 400 })),
     );
     tickScale.value = withDelay(150, withSpring(1, { damping: 10, stiffness: 140 }));
     tickOpacity.value = withDelay(150, withTiming(1, { duration: 200 }));
-  }, [success]);
+  }, [success, ringOpacity, ringScale, tickOpacity, tickScale]);
 
   const tickAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: tickScale.value }],
@@ -70,7 +76,6 @@ export default function BookingCallScreen() {
     opacity: ringOpacity.value,
   }));
 
-  // Auto-fill from profile
   useEffect(() => {
     if (user) {
       setName(user.name);
@@ -100,13 +105,13 @@ export default function BookingCallScreen() {
         purpose: trimmedPurpose || 'General enquiry',
         details: details.trim(),
       });
-      setSuccess('Your call has been booked. A confirmation will be sent to your mobile and shown in notifications.');
+      setSuccess('booked');
       setPurpose('');
       setDetails('');
 
       addNotification({
         title: 'Call booked',
-        body: 'Your call has been booked. We will contact you shortly. A confirmation message has been sent to your mobile.',
+        body: 'Your call has been booked. We will contact you shortly on your mobile.',
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to book call. Try again.';
@@ -114,89 +119,188 @@ export default function BookingCallScreen() {
     } finally {
       setLoading(false);
     }
-  }, [name, mobile, purpose, details]);
+  }, [name, mobile, purpose, details, addNotification]);
+
+  const booked = Boolean(success);
 
   return (
     <KeyboardAvoidingView
-      style={bookingStyles.container}
+      style={s.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
       <ScrollView
-        style={bookingStyles.container}
-        contentContainerStyle={bookingStyles.scrollContent}
+        style={s.container}
+        contentContainerStyle={s.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}>
-        <Text style={bookingStyles.title}>Book Your Call</Text>
-        <Text style={bookingStyles.subtitle}>
-          Fill in the details below. Name and mobile are pre-filled from your profile.
-        </Text>
-
-        <Text style={bookingStyles.label}>Name</Text>
-        <TextInput
-          style={bookingStyles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="Your name"
-          placeholderTextColor={Colors.textMuted}
-          autoCapitalize="words"
-          editable={!loading}
-        />
-
-        <Text style={bookingStyles.label}>Mobile</Text>
-        <TextInput
-          style={bookingStyles.input}
-          value={mobile}
-          onChangeText={setMobile}
-          placeholder="10-digit mobile number"
-          placeholderTextColor={Colors.textMuted}
-          keyboardType="phone-pad"
-          editable={!loading}
-        />
-
-        <Text style={bookingStyles.label}>Purpose of call</Text>
-        <TextInput
-          style={bookingStyles.input}
-          value={purpose}
-          onChangeText={setPurpose}
-          placeholder="e.g. GST filing, Tax consultation, Compliance"
-          placeholderTextColor={Colors.textMuted}
-          editable={!loading}
-        />
-
-        <Text style={bookingStyles.label}>Other details (optional)</Text>
-        <TextInput
-          style={[bookingStyles.input, bookingStyles.inputMultiline]}
-          value={details}
-          onChangeText={setDetails}
-          placeholder="Any specific questions or preferred time..."
-          placeholderTextColor={Colors.textMuted}
-          multiline
-          numberOfLines={4}
-          editable={!loading}
-        />
-
-        {error ? <Text style={bookingStyles.error}>{error}</Text> : null}
-        {success ? (
-          <View style={bookingStyles.successWrap}>
-            <Animated.View style={[bookingStyles.tickRing, ringAnimatedStyle]} />
-            <Animated.View style={[bookingStyles.tickIconWrap, tickAnimatedStyle]}>
-              <Ionicons name="checkmark-circle" size={72} color="#22c55e" />
-            </Animated.View>
-            <Text style={bookingStyles.success}>Your call has been booked and is now in the dashboard.</Text>
-            <Text style={bookingStyles.successSub}>We will contact you shortly.</Text>
+        <View style={s.heroRow}>
+          <View style={s.heroIconWrap}>
+            <Ionicons name="call-outline" size={26} color="#1a73e8" />
           </View>
-        ) : null}
+          <View style={s.heroText}>
+            <Text style={s.title}>Book a call</Text>
+            <Text style={s.subtitle}>
+              Schedule a free consultation with our team. We will call you on the number below.
+            </Text>
+          </View>
+        </View>
 
-        <Pressable
-          onPress={handleBookCall}
-          disabled={loading}
-          style={[bookingStyles.button, loading && bookingStyles.buttonDisabled]}>
-          {loading ? (
-            <ActivityIndicator color={Colors.textOnPrimary} />
-          ) : (
-            <Text style={bookingStyles.buttonText}>Book Call</Text>
-          )}
-        </Pressable>
+        {!booked ? (
+          <>
+            <View style={s.infoBanner}>
+              <Ionicons name="information-circle-outline" size={20} color="#1967d2" />
+              <Text style={s.infoBannerText}>
+                Name and mobile are filled from your profile. You can edit them before booking.
+              </Text>
+            </View>
+
+            <View style={s.googleCard}>
+              <Text style={s.sectionLabel}>CONTACT</Text>
+              <View style={s.listRow}>
+                <View style={s.listIconWrap}>
+                  <Ionicons name="person-outline" size={20} color="#1a73e8" />
+                </View>
+                <View style={s.listBody}>
+                  <Text style={s.listTitle}>Your name</Text>
+                  <TextInput
+                    style={s.input}
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="Full name"
+                    placeholderTextColor="#80868b"
+                    autoCapitalize="words"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+              <View style={s.dividerInset} />
+              <View style={s.listRow}>
+                <View style={s.listIconWrap}>
+                  <Ionicons name="call-outline" size={20} color="#1a73e8" />
+                </View>
+                <View style={s.listBody}>
+                  <Text style={s.listTitle}>Mobile number</Text>
+                  <TextInput
+                    style={s.input}
+                    value={mobile}
+                    onChangeText={setMobile}
+                    placeholder="10-digit mobile"
+                    placeholderTextColor="#80868b"
+                    keyboardType="phone-pad"
+                    editable={!loading}
+                  />
+                </View>
+              </View>
+
+              <View style={s.divider} />
+              <Text style={s.sectionLabel}>ABOUT YOUR CALL</Text>
+              <View style={s.chipRow}>
+                {PURPOSE_CHIPS.map((chip) => {
+                  const selected = purpose === chip;
+                  return (
+                    <Pressable
+                      key={chip}
+                      style={[s.chip, selected && s.chipSelected]}
+                      onPress={() => setPurpose(chip)}
+                      disabled={loading}>
+                      <Text style={[s.chipText, selected && s.chipTextSelected]}>{chip}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={s.fieldBlock}>
+                <Text style={s.fieldLabel}>Purpose</Text>
+                <TextInput
+                  style={s.input}
+                  value={purpose}
+                  onChangeText={setPurpose}
+                  placeholder="What would you like to discuss?"
+                  placeholderTextColor="#80868b"
+                  editable={!loading}
+                />
+              </View>
+              <View style={s.dividerInset} />
+              <View style={s.fieldBlock}>
+                <Text style={s.fieldLabel}>Additional details (optional)</Text>
+                <TextInput
+                  style={[s.input, s.inputMultiline]}
+                  value={details}
+                  onChangeText={setDetails}
+                  placeholder="Preferred time, questions, or context…"
+                  placeholderTextColor="#80868b"
+                  multiline
+                  numberOfLines={4}
+                  editable={!loading}
+                />
+              </View>
+            </View>
+
+            {error ? (
+              <View style={s.errorBanner}>
+                <Ionicons name="alert-circle-outline" size={20} color="#c5221f" />
+                <Text style={s.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            <Pressable
+              onPress={handleBookCall}
+              disabled={loading}
+              style={({ pressed }) => [
+                s.primaryBtn,
+                loading && s.primaryBtnDisabled,
+                pressed && !loading && s.primaryBtnPressed,
+              ]}>
+              {loading ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <Text style={s.primaryBtnText}>Request call</Text>
+              )}
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <View style={s.successCard}>
+              <Animated.View style={[s.tickRing, ringAnimatedStyle]} />
+              <Animated.View style={[s.tickIconWrap, tickAnimatedStyle]}>
+                <Ionicons name="checkmark-circle" size={72} color="#188038" />
+              </Animated.View>
+              <Text style={s.successTitle}>Call requested</Text>
+              <Text style={s.successSub}>
+                Your request is saved. We will call you on {mobile.trim() || 'your mobile'} shortly.
+                A confirmation also appears in Notifications.
+              </Text>
+            </View>
+            <View style={s.googleCard}>
+              <View style={s.listRow}>
+                <View style={[s.listIconWrap, s.listIconWrapGreen]}>
+                  <Ionicons name="calendar-outline" size={20} color="#188038" />
+                </View>
+                <View style={s.listBody}>
+                  <Text style={s.listTitle}>Status</Text>
+                  <Text style={s.listSub}>Pending — our team will reach out soon</Text>
+                </View>
+              </View>
+              <View style={s.dividerInset} />
+              <View style={s.listRow}>
+                <View style={s.listIconWrap}>
+                  <Ionicons name="person-outline" size={20} color="#1a73e8" />
+                </View>
+                <View style={s.listBody}>
+                  <Text style={s.listTitle}>{name.trim() || '—'}</Text>
+                  <Text style={s.listSub}>{mobile.trim() || '—'}</Text>
+                </View>
+              </View>
+            </View>
+            <Pressable
+              style={({ pressed }) => [s.secondaryBtn, pressed && s.primaryBtnPressed]}
+              onPress={() => {
+                setSuccess('');
+                setError('');
+              }}>
+              <Text style={s.secondaryBtnText}>Book another call</Text>
+            </Pressable>
+          </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -24,16 +24,16 @@ import { TRACKER_STEPS, resolveStepsDone } from '@/utils/registration-tracker-st
 export { TRACKER_STEPS } from '@/utils/registration-tracker-steps';
 
 const STATUS_DISPLAY: Record<string, { label: string; color: string; bg: string; icon: string }> = {
-  draft: { label: 'Draft', color: Colors.textSecondary, bg: Colors.surfaceLight, icon: 'create-outline' },
-  payment_pending: { label: 'Payment pending', color: Colors.primaryDark, bg: Colors.surfaceAccent, icon: 'time-outline' },
-  paid: { label: 'Paid', color: Colors.primary, bg: Colors.surfaceAccent, icon: 'checkmark-circle-outline' },
-  submitted: { label: 'Submitted', color: Colors.primary, bg: Colors.surfaceLight, icon: 'send-outline' },
-  initiated: { label: 'Initiated', color: Colors.primary, bg: Colors.surfaceLight, icon: 'play-circle-outline' },
-  filed: { label: 'Filed', color: Colors.primaryDark, bg: Colors.surfaceLight, icon: 'document-attach-outline' },
-  approved: { label: 'Approved', color: Colors.primaryDark, bg: Colors.surfaceAccent, icon: 'ribbon-outline' },
-  completed: { label: 'Completed', color: Colors.primaryDark, bg: Colors.surfaceAccent, icon: 'checkmark-done-circle-outline' },
-  rejected: { label: 'Rejected', color: '#b42318', bg: '#fef3f2', icon: 'close-circle-outline' },
-  pending: { label: 'Pending', color: Colors.textSecondary, bg: Colors.surfaceLight, icon: 'time-outline' },
+  draft: { label: 'Draft', color: '#5f6368', bg: '#f1f3f4', icon: 'create-outline' },
+  payment_pending: { label: 'Payment pending', color: '#b06000', bg: '#fef7e0', icon: 'time-outline' },
+  paid: { label: 'Paid', color: '#188038', bg: '#e6f4ea', icon: 'checkmark-circle-outline' },
+  submitted: { label: 'Submitted', color: '#1967d2', bg: '#e8f0fe', icon: 'send-outline' },
+  initiated: { label: 'Initiated', color: '#1967d2', bg: '#e8f0fe', icon: 'play-circle-outline' },
+  filed: { label: 'Filed', color: '#1967d2', bg: '#e8f0fe', icon: 'document-attach-outline' },
+  approved: { label: 'Approved', color: '#188038', bg: '#e6f4ea', icon: 'ribbon-outline' },
+  completed: { label: 'Completed', color: '#188038', bg: '#e6f4ea', icon: 'checkmark-done-circle-outline' },
+  rejected: { label: 'Rejected', color: '#c5221f', bg: '#fce8e6', icon: 'close-circle-outline' },
+  pending: { label: 'Pending', color: '#5f6368', bg: '#f1f3f4', icon: 'time-outline' },
 };
 
 function PulseCircle() {
@@ -104,7 +104,7 @@ function DocCard({
         <Pressable
           style={ds.dlBtn}
           onPress={() => onDownload(uri, `Director_${directorIndex + 1}_${docType}`)}>
-          <Ionicons name="download-outline" size={18} color={Colors.primary} />
+          <Ionicons name="download-outline" size={18} color="#1a73e8" />
         </Pressable>
       </View>
       {expanded && (
@@ -133,8 +133,10 @@ export function RegistrationDocumentsSection({
   return (
     <View style={T.card}>
       <View style={T.cardHeader}>
-          <Ionicons name="folder-open-outline" size={20} color={Colors.primary} />
-        <Text style={T.cardTitle}>Uploaded Documents</Text>
+        <View style={T.cardHeaderIcon}>
+          <Ionicons name="folder-open-outline" size={20} color="#1a73e8" />
+        </View>
+        <Text style={T.cardTitle}>Uploaded documents</Text>
       </View>
       {directors.map((director: any, di: number) => (
         <View key={`dir-${item._id}-${di}`} style={ds.directorBlock}>
@@ -182,7 +184,7 @@ export function EndedRegistrationPanel({ item }: { item: MyRegistrationItem }) {
   const eff = effectiveRegistrationStatus(item);
   const isRejected = eff === 'rejected';
   const statusDisplay = STATUS_DISPLAY[eff] ?? STATUS_DISPLAY.approved;
-  const statusTint = isRejected ? '#b42318' : Colors.primary;
+  const statusTint = isRejected ? '#c5221f' : '#188038';
   return (
     <View style={T.endedCard}>
       <View style={T.endedTop}>
@@ -241,7 +243,7 @@ export function ActiveRegistrationPanel({ item, isLivePolling, onDownload }: Act
       <View style={T.headerCard}>
         <View style={T.headerTop}>
           <View style={T.headerIcon}>
-            <Ionicons name="document-text-outline" size={22} color={Colors.primary} />
+            <Ionicons name="document-text-outline" size={22} color="#1a73e8" />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={T.headerEyebrow}>In progress</Text>
@@ -277,10 +279,12 @@ export function ActiveRegistrationPanel({ item, isLivePolling, onDownload }: Act
       {(item.paymentAmount !== undefined && item.paymentAmount !== null) || item.paymentStatus ? (
         <View style={T.card}>
           <View style={T.cardHeader}>
-            <Ionicons name="card-outline" size={20} color={Colors.primary} />
-            <Text style={T.cardTitle}>Review & Payment</Text>
+            <View style={T.cardHeaderIcon}>
+              <Ionicons name="card-outline" size={20} color="#1a73e8" />
+            </View>
+            <Text style={T.cardTitle}>Review & payment</Text>
           </View>
-          <View style={{ paddingHorizontal: 18, paddingTop: 16, paddingBottom: 18 }}>
+          <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }}>
             <View style={ps.row}>
               <Text style={ps.label}>Company Name</Text>
               <Text style={ps.value}>{item.proposedName1 || '—'}</Text>
@@ -313,8 +317,10 @@ export function ActiveRegistrationPanel({ item, isLivePolling, onDownload }: Act
 
       <View style={T.card}>
         <View style={T.cardHeader}>
-          <Ionicons name="list-outline" size={20} color={Colors.primary} />
-          <Text style={T.cardTitle}>Step-by-Step Progress</Text>
+          <View style={T.cardHeaderIcon}>
+            <Ionicons name="list-outline" size={20} color="#1a73e8" />
+          </View>
+          <Text style={T.cardTitle}>Filing progress</Text>
         </View>
         {TRACKER_STEPS.map((step, index) => {
           const done = stepsDone[step.key];
@@ -399,61 +405,59 @@ const T = StyleSheet.create({
   registrationBlock: { marginBottom: 4 },
   headerCard: {
     backgroundColor: Colors.white,
-    borderRadius: 14,
-    padding: 20,
+    borderRadius: 8,
+    padding: 16,
     marginBottom: 12,
-    borderWidth: HAIRLINE,
-    borderColor: Colors.borderLight,
+    borderWidth: 1,
+    borderColor: '#e8eaed',
   },
-  headerTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, marginBottom: 16 },
+  headerTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 12 },
   headerIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.surfaceLight,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#e8f0fe',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerEyebrow: { fontSize: 13, fontWeight: '500', color: Colors.textMuted },
-  headerSubName: { fontSize: 20, fontWeight: '600', color: Colors.textPrimary, marginTop: 4, letterSpacing: -0.35 },
-  caseId: { fontSize: 13, fontWeight: '400', color: Colors.textSecondary, marginTop: 6 },
+  headerEyebrow: { fontSize: 11, fontWeight: '600', color: '#80868b', letterSpacing: 0.5, textTransform: 'uppercase' },
+  headerSubName: { fontSize: 18, fontWeight: '500', color: '#202124', marginTop: 4 },
+  caseId: { fontSize: 12, fontWeight: '400', color: '#5f6368', marginTop: 4 },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 100,
-    borderWidth: HAIRLINE,
-    borderColor: Colors.borderLight,
-    backgroundColor: Colors.white,
+    borderRadius: 16,
+    backgroundColor: '#e8f0fe',
   },
-  liveBadgeOff: { backgroundColor: Colors.surface },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.whatsapp },
-  liveDotOff: { backgroundColor: Colors.textMuted },
-  liveText: { fontSize: 12, fontWeight: '600', color: Colors.primary },
-  liveTextOff: { color: Colors.textMuted },
+  liveBadgeOff: { backgroundColor: '#f1f3f4' },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#1a73e8' },
+  liveDotOff: { backgroundColor: '#80868b' },
+  liveText: { fontSize: 12, fontWeight: '600', color: '#1967d2' },
+  liveTextOff: { color: '#5f6368' },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
     paddingVertical: 0,
-    marginBottom: 16,
+    marginBottom: 12,
   },
-  statusBadgeText: { fontSize: 15, fontWeight: '500', letterSpacing: -0.2 },
-  progressTrack: { height: 4, backgroundColor: Colors.divider, borderRadius: 2, overflow: 'hidden', marginBottom: 8 },
-  progressFill: { height: '100%', backgroundColor: Colors.primary, borderRadius: 2 },
+  statusBadgeText: { fontSize: 14, fontWeight: '500' },
+  progressTrack: { height: 4, backgroundColor: '#e8eaed', borderRadius: 2, overflow: 'hidden', marginBottom: 8 },
+  progressFill: { height: '100%', backgroundColor: '#1a73e8', borderRadius: 2 },
   progressRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  progressLabel: { fontSize: 13, fontWeight: '400', color: Colors.textMuted },
-  progressPct: { fontSize: 13, fontWeight: '600', color: Colors.primary },
+  progressLabel: { fontSize: 12, fontWeight: '400', color: '#5f6368' },
+  progressPct: { fontSize: 12, fontWeight: '600', color: '#1a73e8' },
 
   endedCard: {
     backgroundColor: Colors.white,
-    borderRadius: 14,
+    borderRadius: 8,
     marginBottom: 12,
-    borderWidth: HAIRLINE,
-    borderColor: Colors.borderLight,
+    borderWidth: 1,
+    borderColor: '#e8eaed',
     overflow: 'hidden',
   },
   endedTop: {
@@ -461,162 +465,170 @@ const T = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 12,
-    paddingHorizontal: 18,
-    paddingTop: 18,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 4,
   },
-  endedCoName: { fontSize: 20, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.35 },
-  endedCaseId: { fontSize: 15, fontWeight: '400', color: Colors.textMuted, marginTop: 4, lineHeight: 20 },
+  endedCoName: { fontSize: 18, fontWeight: '500', color: '#202124' },
+  endedCaseId: { fontSize: 12, fontWeight: '400', color: '#5f6368', marginTop: 4, lineHeight: 18 },
   endedStatusChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingTop: 2,
   },
-  endedStatusChipText: { fontSize: 15, fontWeight: '500', letterSpacing: -0.2 },
+  endedStatusChipText: { fontSize: 14, fontWeight: '500' },
   endedDivider: {
     height: HAIRLINE,
-    backgroundColor: Colors.divider,
-    marginHorizontal: 18,
-    marginTop: 14,
+    backgroundColor: '#e8eaed',
+    marginHorizontal: 16,
+    marginTop: 12,
   },
   endedMessageRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    paddingHorizontal: 18,
-    paddingTop: 14,
+    paddingHorizontal: 16,
+    paddingTop: 12,
     paddingBottom: 6,
   },
   endedMessageIcon: { marginTop: 2 },
   endedMessageText: {
     flex: 1,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 20,
     fontWeight: '400',
-    color: Colors.textSecondary,
+    color: '#5f6368',
   },
-  endedMessageTextReject: { color: Colors.textSecondary },
+  endedMessageTextReject: { color: '#5f6368' },
   endedProgressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    marginTop: 10,
+    paddingHorizontal: 16,
+    marginTop: 8,
     marginBottom: 8,
   },
-  endedProgressLabel: { fontSize: 13, color: Colors.textMuted, fontWeight: '400' },
-  endedProgressVal: { fontSize: 15, fontWeight: '600', color: Colors.primary, letterSpacing: -0.2 },
-  endedProgressValMuted: { color: Colors.textMuted, fontWeight: '500' },
+  endedProgressLabel: { fontSize: 12, color: '#5f6368', fontWeight: '400' },
+  endedProgressVal: { fontSize: 14, fontWeight: '600', color: '#188038' },
+  endedProgressValMuted: { color: '#80868b', fontWeight: '500' },
   progressTrackLight: {
-    height: 2,
-    backgroundColor: Colors.divider,
-    borderRadius: 1,
-    marginHorizontal: 18,
-    marginBottom: 18,
+    height: 4,
+    backgroundColor: '#e8eaed',
+    borderRadius: 2,
+    marginHorizontal: 16,
+    marginBottom: 16,
     overflow: 'hidden',
   },
-  progressFillLight: { height: '100%', backgroundColor: Colors.primary, borderRadius: 1 },
+  progressFillLight: { height: '100%', backgroundColor: '#188038', borderRadius: 2 },
 
   card: {
     backgroundColor: Colors.white,
-    borderRadius: 14,
+    borderRadius: 8,
     marginBottom: 12,
     overflow: 'hidden',
-    borderWidth: HAIRLINE,
-    borderColor: Colors.borderLight,
+    borderWidth: 1,
+    borderColor: '#e8eaed',
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 12,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
     borderBottomWidth: HAIRLINE,
-    borderBottomColor: Colors.borderLight,
+    borderBottomColor: '#e8eaed',
   },
-  cardTitle: { fontSize: 17, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.2 },
+  cardHeaderIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#e8f0fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitle: { fontSize: 16, fontWeight: '500', color: '#202124' },
 });
 
 const ts = StyleSheet.create({
-  stepRow: { flexDirection: 'row', paddingHorizontal: 18 },
-  leftCol: { alignItems: 'center', marginRight: 12 },
-  circleWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center', marginTop: 12 },
-  pulseRing: { position: 'absolute', width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0, 128, 193, 0.22)' },
+  stepRow: { flexDirection: 'row', paddingHorizontal: 16 },
+  leftCol: { alignItems: 'center', marginRight: 12, width: 32 },
+  circleWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+  pulseRing: { position: 'absolute', width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(26, 115, 232, 0.22)' },
   circle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: Colors.surface,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#f1f3f4',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1,
-    borderWidth: HAIRLINE,
-    borderColor: Colors.border,
+    borderWidth: 2,
+    borderColor: '#dadce0',
   },
-  circleDone: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  circleCurrent: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  line: { width: 1.5, flex: 1, minHeight: 20, backgroundColor: Colors.divider, marginTop: 2, marginBottom: 2 },
-  lineDone: { backgroundColor: Colors.primaryLight },
-  stepNum: { fontSize: 12, fontWeight: '600', color: Colors.textMuted },
-  contentCol: { flex: 1, paddingTop: 10, paddingBottom: 16 },
+  circleDone: { backgroundColor: '#188038', borderColor: '#188038' },
+  circleCurrent: { backgroundColor: '#1a73e8', borderColor: '#1a73e8' },
+  line: { width: 2, flex: 1, minHeight: 24, backgroundColor: '#dadce0', marginTop: 2, marginBottom: 2 },
+  lineDone: { backgroundColor: '#188038' },
+  stepNum: { fontSize: 11, fontWeight: '600', color: '#80868b' },
+  contentCol: { flex: 1, paddingTop: 12, paddingBottom: 18 },
   labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  label: { fontSize: 15, fontWeight: '500', color: Colors.textMuted },
-  labelDone: { color: Colors.textPrimary, fontWeight: '600' },
-  labelCurrent: { color: Colors.primary, fontWeight: '600' },
-  sublabel: { fontSize: 13, fontWeight: '400', color: Colors.textMuted, marginTop: 4, lineHeight: 18 },
-  doneBadge: { backgroundColor: Colors.surfaceAccent, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
-  doneBadgeText: { fontSize: 11, fontWeight: '600', color: Colors.primaryDark },
-  inProgressBadge: { backgroundColor: Colors.surfaceLight, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 100 },
-  inProgressText: { fontSize: 11, fontWeight: '600', color: Colors.primary },
+  label: { fontSize: 14, fontWeight: '400', color: '#80868b' },
+  labelDone: { color: '#202124', fontWeight: '500' },
+  labelCurrent: { color: '#1a73e8', fontWeight: '500' },
+  sublabel: { fontSize: 12, fontWeight: '400', color: '#5f6368', marginTop: 4, lineHeight: 16 },
+  doneBadge: { backgroundColor: '#e6f4ea', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
+  doneBadgeText: { fontSize: 11, fontWeight: '600', color: '#188038' },
+  inProgressBadge: { backgroundColor: '#e8f0fe', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
+  inProgressText: { fontSize: 11, fontWeight: '600', color: '#1967d2' },
 });
 
 const ds = StyleSheet.create({
-  directorBlock: { borderTopWidth: HAIRLINE, borderTopColor: Colors.borderLight, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 16 },
+  directorBlock: { borderTopWidth: HAIRLINE, borderTopColor: '#e8eaed', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 16 },
   directorHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   directorAvatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: Colors.surfaceLight,
+    backgroundColor: '#e8f0fe',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  directorAvatarText: { fontSize: 15, fontWeight: '600', color: Colors.primary },
-  directorName: { fontSize: 15, fontWeight: '600', color: Colors.textPrimary },
-  directorMeta: { fontSize: 12, fontWeight: '400', color: Colors.textMuted, marginTop: 2 },
+  directorAvatarText: { fontSize: 14, fontWeight: '600', color: '#1967d2' },
+  directorName: { fontSize: 14, fontWeight: '500', color: '#202124' },
+  directorMeta: { fontSize: 12, fontWeight: '400', color: '#5f6368', marginTop: 2 },
   docRow: { flexDirection: 'row', justifyContent: 'space-between' },
   docThird: { flex: 1 },
-  card: { borderRadius: 12, overflow: 'hidden', backgroundColor: Colors.surface, borderWidth: HAIRLINE, borderColor: Colors.borderLight },
-  previewArea: { height: 100, backgroundColor: Colors.surfaceLight, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  card: { borderRadius: 8, overflow: 'hidden', backgroundColor: Colors.white, borderWidth: 1, borderColor: '#e8eaed' },
+  previewArea: { height: 100, backgroundColor: '#f8f9fa', alignItems: 'center', justifyContent: 'center', position: 'relative' },
   img: { width: '100%', height: '100%' },
   expandHint: { position: 'absolute', bottom: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 6, padding: 3 },
   pdfPlaceholder: { alignItems: 'center', gap: 4 },
-  pdfText: { fontSize: 11, fontWeight: '600', color: Colors.primaryDark },
+  pdfText: { fontSize: 11, fontWeight: '600', color: '#c5221f' },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 10, paddingVertical: 8 },
-  footerLabel: { fontSize: 13, fontWeight: '500', color: Colors.textSecondary },
-  footerSub: { fontSize: 11, fontWeight: '400', color: Colors.textMuted },
+  footerLabel: { fontSize: 12, fontWeight: '500', color: '#202124' },
+  footerSub: { fontSize: 11, fontWeight: '400', color: '#5f6368' },
   dlBtn: {
     width: 34,
     height: 34,
     borderRadius: 8,
-    backgroundColor: Colors.surfaceLight,
+    backgroundColor: '#e8f0fe',
     alignItems: 'center',
     justifyContent: 'center',
   },
   missing: {
     height: 120,
-    borderRadius: 12,
-    borderWidth: HAIRLINE,
+    borderRadius: 8,
+    borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+    borderColor: '#dadce0',
+    backgroundColor: '#f8f9fa',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
-  missingText: { fontSize: 12, fontWeight: '400', color: Colors.textMuted },
+  missingText: { fontSize: 12, fontWeight: '400', color: '#80868b' },
   lightboxBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.88)', alignItems: 'center', justifyContent: 'center', zIndex: 999 },
   lightboxImg: { width: '92%', height: '75%' },
   lightboxClose: { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 24, right: 20 },
@@ -629,23 +641,23 @@ const ps = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: HAIRLINE,
-    borderBottomColor: Colors.borderLight,
+    borderBottomColor: '#e8eaed',
   },
-  label: { fontSize: 15, fontWeight: '400', color: Colors.textMuted },
-  value: { fontSize: 15, fontWeight: '500', color: Colors.textPrimary, flex: 1, textAlign: 'right', marginLeft: 12 },
-  amount: { fontSize: 22, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.5 },
-  statusBox: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, alignItems: 'center', marginBottom: 12 },
-  statusUnpaid: { backgroundColor: Colors.surfaceAccent },
-  statusPaid: { backgroundColor: Colors.surfaceLight },
+  label: { fontSize: 14, fontWeight: '400', color: '#5f6368' },
+  value: { fontSize: 14, fontWeight: '500', color: '#202124', flex: 1, textAlign: 'right', marginLeft: 12 },
+  amount: { fontSize: 20, fontWeight: '500', color: '#202124' },
+  statusBox: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
+  statusUnpaid: { backgroundColor: '#fef7e0' },
+  statusPaid: { backgroundColor: '#e6f4ea' },
   statusText: { fontSize: 13, fontWeight: '600' },
-  statusTextUnpaid: { color: Colors.primaryDark },
-  statusTextPaid: { color: Colors.primary },
+  statusTextUnpaid: { color: '#b06000' },
+  statusTextPaid: { color: '#188038' },
   payBtn: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 12,
+    backgroundColor: '#1a73e8',
+    paddingVertical: 12,
+    borderRadius: 8,
     alignItems: 'center',
     marginTop: 4,
   },
-  payBtnText: { color: Colors.textOnPrimary, fontSize: 17, fontWeight: '600' },
+  payBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 });

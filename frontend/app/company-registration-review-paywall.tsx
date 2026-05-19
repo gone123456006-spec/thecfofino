@@ -12,7 +12,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
@@ -36,11 +35,44 @@ import {
   setCompanyRegistrationDraft,
 } from '@/utils/company-registration-draft';
 import {
+  computeCompanyRegistrationPayment,
+  formatINR,
+} from '@/utils/company-registration-payment';
+import {
+  sanitizeAadhaarInput,
+  sanitizeIndianMobileInput,
+  sanitizePanInput,
+  validateAadhaar,
+  validateCompanyMobile,
+  validatePan,
+} from '@/utils/company-registration-validation';
+import {
   buildRazorpayHtml,
   type RazorpayPayload,
 } from '@/utils/razorpay-webview';
+import { GoogleOutlinedField } from '@/components/GoogleOutlinedField';
+import { RazorpayBrandIcon } from '@/components/RazorpayBrandIcon';
+import { Colors } from '@/constants/theme';
+import {
+  reviewEditStyles,
+  reviewPaywallStyles as s,
+  reviewRzpStyles,
+  reviewTableStyles as tableStyles,
+  reviewThumbStyles as thumbStyles,
+} from '@/styles/company-registration-review-paywall.styles';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+const LOCKED_UNTIL_PAYMENT: {
+  label: string;
+  desc: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+  { label: 'Filing process', desc: 'MCA submission workflow', icon: 'folder-open-outline' },
+  { label: 'Document upload', desc: 'PAN, Aadhaar & supporting files', icon: 'cloud-upload-outline' },
+  { label: 'Case ID generation', desc: 'Official registration reference', icon: 'key-outline' },
+  { label: 'Status tracking', desc: 'Live updates on your application', icon: 'pulse-outline' },
+];
 
 type Director = {
   name: string;
@@ -79,10 +111,12 @@ function TableRow({
       <Text style={tableStyles.rowLabel}>{label}</Text>
       <View style={tableStyles.rowValueWrap}>
         <Text style={tableStyles.rowValue} numberOfLines={2}>{value || '—'}</Text>
-        {!isLocked && (
-          <Pressable onPress={onEdit} hitSlop={8} style={tableStyles.editBtn}>
-            <Ionicons name="pencil" size={13} color="#6366f1" />
+        {!isLocked ? (
+          <Pressable onPress={onEdit} hitSlop={8} style={tableStyles.editBtn} accessibilityLabel={`Edit ${label}`}>
+            <Ionicons name="create-outline" size={18} color={Colors.primary} />
           </Pressable>
+        ) : (
+          <Ionicons name="lock-closed-outline" size={16} color="#80868b" />
         )}
       </View>
     </View>
@@ -143,8 +177,12 @@ export default function CompanyRegistrationReviewPaywallScreen() {
   const [paying, setPaying] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
 
+  const [basePriceINR, setBasePriceINR] = useState(1);
+  const [gstPercent, setGstPercent] = useState(0);
+  const [gstAmountINR, setGstAmountINR] = useState(0);
+  /** Total payable (base + GST) — charged via Razorpay. */
   const [paymentAmountINR, setPaymentAmountINR] = useState(1);
-  const [productTitle, setProductTitle] = useState('Company Registration — Filing Fee');
+  const [productTitle, setProductTitle] = useState('Company Registration');
   const [productDescription, setProductDescription] = useState(
     'Secure payment via Razorpay. Unlocks document upload and MCA filing.',
   );
@@ -167,9 +205,14 @@ export default function CompanyRegistrationReviewPaywallScreen() {
     setPaymentConfigLoading(true);
     try {
       const cfg = await fetchPaymentPublicConfig();
-      if (cfg.companyRegistrationAmountINR >= 1) {
-        setPaymentAmountINR(cfg.companyRegistrationAmountINR);
-      }
+      const base =
+        cfg.companyRegistrationBasePriceINR ?? cfg.companyRegistrationAmountINR ?? 1;
+      const gst = cfg.companyRegistrationGstPercent ?? 0;
+      const pricing = computeCompanyRegistrationPayment(base, gst);
+      setBasePriceINR(pricing.basePriceINR);
+      setGstPercent(pricing.gstPercent);
+      setGstAmountINR(cfg.companyRegistrationGstAmountINR ?? pricing.gstAmountINR);
+      setPaymentAmountINR(cfg.companyRegistrationTotalPayableINR ?? pricing.totalPayableINR);
       if (cfg.productTitle) setProductTitle(cfg.productTitle);
       if (cfg.productDescription) setProductDescription(cfg.productDescription);
       setRazorpayConfiguredOnServer(cfg.razorpayConfigured !== false);
@@ -247,19 +290,63 @@ export default function CompanyRegistrationReviewPaywallScreen() {
     setEditModalVisible(true);
   };
 
+  const COMPANY_KEYS_LOCKED_WITH_CASE = new Set([
+    'businessType',
+    'proposedName1',
+    'proposedName2',
+    'proposedName3',
+    'companyMobile',
+    'companyEmail',
+    'businessActivity',
+    'registeredAddress',
+    'capitalStructure',
+  ]);
+
   const saveEdit = () => {
     if (!editField || !draft) return;
+    if (draft.caseId && editField.section === 'company' && COMPANY_KEYS_LOCKED_WITH_CASE.has(editField.key)) {
+      Alert.alert('Cannot edit', 'Company details are locked after your Case ID was generated.');
+      setEditModalVisible(false);
+      return;
+    }
+
+    let value = editValue.trim();
+    if (editField.key === 'companyMobile') {
+      value = sanitizeIndianMobileInput(value);
+      const err = validateCompanyMobile(value);
+      if (err) {
+        Alert.alert('Invalid mobile', err);
+        return;
+      }
+    }
+    if (editField.key === 'pan') {
+      value = sanitizePanInput(value);
+      const err = validatePan(value);
+      if (err) {
+        Alert.alert('Invalid PAN', err);
+        return;
+      }
+    }
+    if (editField.key === 'aadhaar') {
+      value = sanitizeAadhaarInput(value);
+      const err = validateAadhaar(value);
+      if (err) {
+        Alert.alert('Invalid Aadhaar', err);
+        return;
+      }
+    }
+
     let updated: CompanyRegistrationDraft = { ...draft };
 
     if (editField.section === 'director' && editField.directorIndex !== undefined) {
       const dirs = [...(draft.directors || [])];
       dirs[editField.directorIndex] = {
         ...dirs[editField.directorIndex],
-        [editField.key]: editValue.trim(),
+        [editField.key]: value,
       };
       updated = { ...updated, directors: dirs };
     } else {
-      updated = { ...updated, [editField.key]: editValue.trim() };
+      updated = { ...updated, [editField.key]: value };
     }
 
     setDraft(updated);
@@ -287,6 +374,8 @@ export default function CompanyRegistrationReviewPaywallScreen() {
     }
 
     setPaying(true);
+    setRazorpayModalVisible(true);
+    setRazorpayHtml(null);
     try {
       const api = getApiBase();
       const receipt = (draft?.caseId || draft?._id || `company_reg_${Date.now()}`).toString().slice(0, 40);
@@ -326,8 +415,9 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         themeColor: '#3395ff',
       });
       setRazorpayHtml(html);
-      setRazorpayModalVisible(true);
     } catch (err: unknown) {
+      setRazorpayModalVisible(false);
+      setRazorpayHtml(null);
       const msg = err instanceof Error ? err.message : 'Something went wrong';
       Alert.alert('Payment Error', msg);
     } finally {
@@ -420,24 +510,24 @@ export default function CompanyRegistrationReviewPaywallScreen() {
           setRazorpayModalVisible(false);
           Alert.alert('Payment Cancelled', 'You can try again anytime.');
         }}>
-        <View style={rzpStyles.container}>
-          <View style={rzpStyles.header}>
-            <View style={rzpStyles.headerLeft}>
-              <Text style={rzpStyles.headerTitle}>Checkout</Text>
-              <Text style={rzpStyles.headerSub}>Razorpay · Finovert</Text>
+        <View style={reviewRzpStyles.container}>
+          <View style={reviewRzpStyles.header}>
+            <View style={reviewRzpStyles.headerLeft}>
+              <Text style={reviewRzpStyles.headerTitle}>Checkout</Text>
+              <Text style={reviewRzpStyles.headerSub}>Razorpay · Finovert</Text>
             </View>
             <Pressable
-              style={rzpStyles.closeBtn}
+              style={reviewRzpStyles.closeBtn}
               onPress={() => {
                 setRazorpayModalVisible(false);
                 Alert.alert('Payment Cancelled', 'You can try again anytime.');
               }}>
-              <Ionicons name="close" size={22} color="#374151" />
+              <Ionicons name="close" size={22} color="#5f6368" />
             </Pressable>
           </View>
-          <View style={rzpStyles.secureBar}>
-            <Ionicons name="lock-closed-outline" size={14} color="#3395ff" />
-            <Text style={rzpStyles.secureText}>
+          <View style={reviewRzpStyles.secureBar}>
+            <Ionicons name="lock-closed-outline" size={14} color={Colors.primary} />
+            <Text style={reviewRzpStyles.secureText}>
               Encrypted checkout — UPI & wallets via Razorpay
             </Text>
           </View>
@@ -449,14 +539,15 @@ export default function CompanyRegistrationReviewPaywallScreen() {
               javaScriptEnabled
               domStorageEnabled
               startInLoadingState
-              mixedContentMode="never"
+              mixedContentMode="always"
               setSupportMultipleWindows={false}
-              cacheEnabled={false}
+              cacheEnabled
               allowsBackForwardNavigationGestures={false}
+              originWhitelist={['*']}
               renderLoading={() => (
-                <View style={rzpStyles.loading}>
-                  <ActivityIndicator size="large" color="#3395ff" />
-                  <Text style={rzpStyles.loadingText}>Loading payment…</Text>
+                <View style={reviewRzpStyles.loading}>
+                  <ActivityIndicator size="large" color={Colors.primary} />
+                  <Text style={reviewRzpStyles.loadingText}>Loading checkout…</Text>
                 </View>
               )}
               onError={() => {
@@ -473,9 +564,14 @@ export default function CompanyRegistrationReviewPaywallScreen() {
                   Alert.alert('Checkout error', `Payment page failed to load (${code}). Please try again.`);
                 }
               }}
-              style={rzpStyles.webview}
+              style={reviewRzpStyles.webview}
             />
-          ) : null}
+          ) : (
+            <View style={reviewRzpStyles.loading}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={reviewRzpStyles.loadingText}>Preparing payment…</Text>
+            </View>
+          )}
         </View>
       </Modal>
 
@@ -485,68 +581,76 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         transparent
         animationType="slide"
         onRequestClose={() => setEditModalVisible(false)}>
-        <Pressable style={editStyles.overlay} onPress={() => setEditModalVisible(false)}>
-          <Pressable style={editStyles.sheet} onPress={() => {}}>
-            <View style={editStyles.handle} />
-            <Text style={editStyles.title}>Edit {editField?.label}</Text>
-            <TextInput
-              style={editStyles.input}
-              value={editValue}
-              onChangeText={setEditValue}
-              autoFocus
-              multiline={['businessActivity', 'registeredAddress'].includes(editField?.key ?? '')}
-              numberOfLines={['businessActivity', 'registeredAddress'].includes(editField?.key ?? '') ? 3 : 1}
-              placeholder={`Enter ${editField?.label}`}
-              placeholderTextColor="#9ca3af"
-            />
-            <View style={editStyles.btnRow}>
-              <Pressable style={editStyles.cancelBtn} onPress={() => setEditModalVisible(false)}>
-                <Text style={editStyles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={editStyles.saveBtn} onPress={saveEdit}>
-                <Text style={editStyles.saveText}>Save</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
+        <View style={reviewEditStyles.overlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditModalVisible(false)} />
+          <View style={reviewEditStyles.sheet}>
+            <View style={reviewEditStyles.handle} />
+            <Text style={reviewEditStyles.title}>Edit {editField?.label}</Text>
+            {editField ? (
+              <GoogleOutlinedField
+                label={editField.label}
+                value={editValue}
+                onChangeText={setEditValue}
+                placeholder={`Enter ${editField.label}`}
+                multiline={['businessActivity', 'registeredAddress'].includes(editField.key)}
+                numberOfLines={['businessActivity', 'registeredAddress'].includes(editField.key) ? 3 : 1}
+              />
+            ) : null}
+            <Pressable style={reviewEditStyles.saveBtn} onPress={saveEdit}>
+              <Text style={reviewEditStyles.saveText}>Save</Text>
+            </Pressable>
+            <Pressable style={reviewEditStyles.cancelBtn} onPress={() => setEditModalVisible(false)}>
+              <Text style={reviewEditStyles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
       </Modal>
 
-      <ScrollView style={s.container} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <View style={s.screen}>
+      <ScrollView style={s.scroll} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
 
         {/* ── Header ── */}
         <View style={s.header}>
-          <View style={s.headerBadge}>
-            <Ionicons name="checkmark-circle" size={22} color="#22c55e" />
-            <Text style={s.headerBadgeText}>Submitted</Text>
-          </View>
-          <Text style={s.headerTitle}>Review & Pay</Text>
-          <Text style={s.headerSub}>Verify your details below. Tap{' '}
-            <Ionicons name="pencil" size={12} color="#6366f1" /> to edit any field before paying.
-              </Text>
+          <View style={s.headerCenterCol}>
+            <View style={s.headerBadge}>
+              <Ionicons name="checkmark-circle" size={14} color="#188038" />
+              <Text style={s.headerBadgeText}>Submitted</Text>
             </View>
+            {draft?.caseId ? (
+              <View style={s.caseIdInline}>
+                <Text style={s.caseIdInlineLabel}>Case ID</Text>
+                <Text style={s.caseIdInlineSep}>·</Text>
+                <Text style={s.caseIdInlineValue} selectable numberOfLines={1}>
+                  {draft.caseId}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={s.headerSub}>
+            {draft?.caseId
+              ? 'Company information is locked after your Case ID was generated.'
+              : 'Please review your details below. Tap the edit icon on any row to update them before you complete payment.'}
+          </Text>
+        </View>
 
         {/* ── Summary Table ── */}
         {draft ? (
           <View style={s.card}>
             <View style={s.cardHeader}>
-              <Ionicons name="business-outline" size={18} color="#6366f1" />
-              <Text style={s.cardTitle}>Company Details</Text>
-              <Text style={s.cardHint}>Tap pencil to edit</Text>
+              <Text style={s.cardTitle}>Company details</Text>
+              {!draft.caseId ? <Text style={s.cardHint}>Editable</Text> : null}
             </View>
 
-            <View style={tableStyles.table}>
-              {draft.caseId ? (
-                <TableRow label="Case ID" value={draft.caseId} onEdit={() => { }} isLocked />
-              ) : null}
-              <TableRow label="Business Type" value={draft.businessType || ''} onEdit={() => openEdit({ section: 'company', key: 'businessType', label: 'Business Type', currentValue: draft.businessType || '' })} />
-              <TableRow label="Name 1 (Primary)" value={draft.proposedName1 || ''} onEdit={() => openEdit({ section: 'company', key: 'proposedName1', label: 'Proposed Name 1', currentValue: draft.proposedName1 || '' })} />
-              <TableRow label="Name 2" value={draft.proposedName2 || ''} onEdit={() => openEdit({ section: 'company', key: 'proposedName2', label: 'Proposed Name 2', currentValue: draft.proposedName2 || '' })} />
-              <TableRow label="Name 3" value={draft.proposedName3 || ''} onEdit={() => openEdit({ section: 'company', key: 'proposedName3', label: 'Proposed Name 3', currentValue: draft.proposedName3 || '' })} />
-              <TableRow label="Mobile" value={draft.companyMobile || ''} onEdit={() => openEdit({ section: 'company', key: 'companyMobile', label: 'Company Mobile', currentValue: draft.companyMobile || '' })} />
-              <TableRow label="Email" value={draft.companyEmail || ''} onEdit={() => openEdit({ section: 'company', key: 'companyEmail', label: 'Company Email', currentValue: draft.companyEmail || '' })} />
-              <TableRow label="Business Activity" value={draft.businessActivity || ''} onEdit={() => openEdit({ section: 'company', key: 'businessActivity', label: 'Business Activity', currentValue: draft.businessActivity || '' })} />
-              <TableRow label="Registered Address" value={draft.registeredAddress || ''} onEdit={() => openEdit({ section: 'company', key: 'registeredAddress', label: 'Registered Address', currentValue: draft.registeredAddress || '' })} />
-              <TableRow label="Capital Structure" value={draft.capitalStructure || ''} onEdit={() => openEdit({ section: 'company', key: 'capitalStructure', label: 'Capital Structure', currentValue: draft.capitalStructure || '' })} />
+            <View>
+              <TableRow label="Business Type" value={draft.businessType || ''} onEdit={() => openEdit({ section: 'company', key: 'businessType', label: 'Business Type', currentValue: draft.businessType || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Name 1 (Primary)" value={draft.proposedName1 || ''} onEdit={() => openEdit({ section: 'company', key: 'proposedName1', label: 'Proposed Name 1', currentValue: draft.proposedName1 || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Name 2" value={draft.proposedName2 || '—'} onEdit={() => openEdit({ section: 'company', key: 'proposedName2', label: 'Proposed Name 2', currentValue: draft.proposedName2 || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Name 3" value={draft.proposedName3 || '—'} onEdit={() => openEdit({ section: 'company', key: 'proposedName3', label: 'Proposed Name 3', currentValue: draft.proposedName3 || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Mobile" value={draft.companyMobile || ''} onEdit={() => openEdit({ section: 'company', key: 'companyMobile', label: 'Company Mobile', currentValue: draft.companyMobile || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Email" value={draft.companyEmail || ''} onEdit={() => openEdit({ section: 'company', key: 'companyEmail', label: 'Company Email', currentValue: draft.companyEmail || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Business Activity" value={draft.businessActivity || ''} onEdit={() => openEdit({ section: 'company', key: 'businessActivity', label: 'Business Activity', currentValue: draft.businessActivity || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Registered Address" value={draft.registeredAddress || ''} onEdit={() => openEdit({ section: 'company', key: 'registeredAddress', label: 'Registered Address', currentValue: draft.registeredAddress || '' })} isLocked={!!draft.caseId} />
+              <TableRow label="Capital Structure" value={draft.capitalStructure || ''} onEdit={() => openEdit({ section: 'company', key: 'capitalStructure', label: 'Capital Structure', currentValue: draft.capitalStructure || '' })} isLocked={!!draft.caseId} />
             </View>
           </View>
         ) : null}
@@ -555,12 +659,11 @@ export default function CompanyRegistrationReviewPaywallScreen() {
         {(draft?.directors || []).map((dir, i) => (
           <View key={`dir-${i}`} style={s.card}>
             <View style={s.cardHeader}>
-              <Ionicons name="person-circle-outline" size={18} color="#6366f1" />
               <Text style={s.cardTitle}>Director {i + 1}</Text>
-              <Text style={s.cardHint}>Tap pencil to edit</Text>
+              <Text style={s.cardHint}>Editable</Text>
             </View>
 
-            <View style={tableStyles.table}>
+            <View>
               <TableRow label="Full Name" value={dir.name} onEdit={() => openEdit({ section: 'director', key: 'name', label: 'Director Name', directorIndex: i, currentValue: dir.name })} />
               <TableRow label="PAN" value={dir.pan} onEdit={() => openEdit({ section: 'director', key: 'pan', label: 'PAN Number', directorIndex: i, currentValue: dir.pan })} />
               <TableRow label="Aadhaar" value={dir.aadhaar} onEdit={() => openEdit({ section: 'director', key: 'aadhaar', label: 'Aadhaar Number', directorIndex: i, currentValue: dir.aadhaar })} />
@@ -602,46 +705,13 @@ export default function CompanyRegistrationReviewPaywallScreen() {
           </View>
         )}
 
-        {/* ── Payment summary (dashboard-managed amount) ── */}
-        <View style={s.card}>
-          <View style={s.cardHeader}>
-            <Ionicons name="cash-outline" size={18} color="#6366f1" />
-            <Text style={s.cardTitle}>Filing fee</Text>
-          </View>
-          <View style={s.paySummaryBody}>
-            <Text style={s.paySummaryTitle}>{productTitle}</Text>
-            <Text style={s.paySummaryDesc}>{productDescription}</Text>
-            {paymentConfigLoading ? (
-              <ActivityIndicator style={{ marginTop: 12 }} color="#6366f1" />
-            ) : (
-              <View style={s.totalRow}>
-                <Text style={s.totalLabel}>Amount due</Text>
-                <Text style={s.totalValue}>₹{paymentAmountINR.toLocaleString('en-IN')}</Text>
-              </View>
-            )}
-            {!razorpayConfiguredOnServer && !paymentConfigLoading ? (
-              <View style={s.gatewayWarn}>
-                <Ionicons name="warning-outline" size={16} color="#b45309" />
-                <Text style={s.gatewayWarnText}>
-                  We could not confirm Razorpay keys on the server (or the config endpoint failed). You can still tap Pay — if
-                  checkout fails, update server .env and deploy, or use EXPO_PUBLIC_API_URL to point at the correct API.
-                </Text>
-              </View>
-            ) : null}
-            <Text style={s.dashboardHint}>
-              Fee is set from your Finovert admin dashboard and applies to all app users.
-            </Text>
-          </View>
-        </View>
-
         {/* ── Timeline & Policy ── */}
         <View style={s.card}>
           <View style={s.cardHeader}>
-            <Ionicons name="time-outline" size={18} color="#6366f1" />
-            <Text style={s.cardTitle}>Timeline & Policy</Text>
-        </View>
+            <Text style={s.cardTitle}>Timeline & policy</Text>
+          </View>
           <View style={s.infoRow}>
-            <Ionicons name="calendar-outline" size={16} color="#6366f1" />
+            <Ionicons name="calendar-outline" size={16} color={Colors.primary} />
             <Text style={s.infoText}>7–15 working days (subject to document verification)</Text>
         </View>
           <View style={s.infoRow}>
@@ -654,212 +724,108 @@ export default function CompanyRegistrationReviewPaywallScreen() {
       </View>
         </View>
 
-        {/* ── Locked Features ── */}
-        <View style={[s.card, s.lockCard]}>
-          <View style={s.cardHeader}>
-            <Ionicons name="lock-closed" size={18} color="#f59e0b" />
-            <Text style={[s.cardTitle, { color: '#92400e' }]}>Locked Until Payment</Text>
-          </View>
-          <View style={s.lockedGrid}>
-            {['Filing process', 'Document upload', 'Case ID generation', 'Status tracking'].map((item) => (
-              <View key={item} style={s.lockedChip}>
-                <Ionicons name="lock-closed-outline" size={13} color="#b45309" />
-                <Text style={s.lockedChipText}>{item}</Text>
-        </View>
-            ))}
-      </View>
-        </View>
-
-        {/* ── Razorpay CTA ── */}
+        {/* ── Locked until payment (Google list) ── */}
         <View style={s.card}>
-          <View style={s.cardHeader}>
-            <Ionicons name="card-outline" size={18} color="#3395ff" />
-            <Text style={s.cardTitle}>Pay with Razorpay</Text>
+          <View style={s.lockCardIntro}>
+            <View style={s.lockIntroIconWrap}>
+              <Ionicons name="lock-closed" size={20} color="#5f6368" />
+            </View>
+            <View style={s.lockIntroText}>
+              <Text style={s.cardTitle}>Locked until payment</Text>
+              <Text style={s.lockCardSub}>
+                Complete payment below to unlock the next steps in your registration.
+              </Text>
+            </View>
           </View>
-          <View style={s.rzpInfoRow}>
-            <Ionicons name="shield-checkmark-outline" size={16} color="#22c55e" />
-            <Text style={s.rzpInfoText}>
-              Checkout shows UPI and wallets only (cards, EMI, net banking and Pay Later are hidden).
-            </Text>
-          </View>
-          <View style={s.rzpMethodRow}>
-            {['UPI', 'Wallets'].map((m) => (
-              <View key={m} style={s.rzpMethodChip}>
-                <Text style={s.rzpMethodText}>{m}</Text>
+          <View style={s.lockList}>
+            {LOCKED_UNTIL_PAYMENT.map((item, index) => (
+              <View key={item.label}>
+                <View style={s.lockListRow}>
+                  <View style={s.lockFeatureIconWrap}>
+                    <Ionicons name={item.icon} size={20} color="#1a73e8" />
+                  </View>
+                  <View style={s.lockListContent}>
+                    <Text style={s.lockListLabel}>{item.label}</Text>
+                    <Text style={s.lockListDesc}>{item.desc}</Text>
+                  </View>
+                  <Ionicons name="lock-closed" size={18} color="#dadce0" />
+                </View>
+                {index < LOCKED_UNTIL_PAYMENT.length - 1 ? <View style={s.lockListDivider} /> : null}
               </View>
             ))}
           </View>
-          <View style={s.rzpBadgeRow}>
-            <View style={s.rzpBadgeBlue}>
-              <Text style={s.rzpBadgeTextBlue}>Powered by Razorpay</Text>
-            </View>
+        </View>
+
+        {/* ── Payment ── */}
+        <View style={s.card}>
+          <View style={s.cardHeader}>
+            <Text style={s.cardTitle}>Payment</Text>
+          </View>
+          <View style={s.paySummaryBody}>
+            {paymentConfigLoading ? (
+              <ActivityIndicator style={{ marginTop: 12 }} color={Colors.primary} />
+            ) : (
+              <View style={s.payBreakdown}>
+                <View style={s.payBreakdownRow}>
+                  <Text style={s.payBreakdownLabel}>Base price</Text>
+                  <Text style={s.payBreakdownValue}>{formatINR(basePriceINR)}</Text>
+                </View>
+                <View style={s.payBreakdownRow}>
+                  <Text style={s.payBreakdownLabel}>GST ({gstPercent}%)</Text>
+                  <Text style={s.payBreakdownValue}>
+                    {gstPercent > 0 ? formatINR(gstAmountINR) : formatINR(0)}
+                  </Text>
+                </View>
+                <View style={[s.payBreakdownRow, s.payBreakdownTotalRow]}>
+                  <Text style={s.payBreakdownTotalLabel}>Total payable</Text>
+                  <Text style={s.payBreakdownTotalValue}>{formatINR(paymentAmountINR)}</Text>
+                </View>
+              </View>
+            )}
+            {!razorpayConfiguredOnServer && !paymentConfigLoading ? (
+              <View style={s.gatewayWarn}>
+                <Ionicons name="warning-outline" size={16} color="#b45309" />
+                <Text style={s.gatewayWarnText}>
+                  We could not confirm Razorpay keys on the server (or the config endpoint failed). You can still tap Pay — if
+                  checkout fails, update server .env and deploy, or use EXPO_PUBLIC_API_URL to point at the correct API.
+                </Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
-        {/* ── Pay CTA ── */}
-      <Pressable
+      </ScrollView>
+
+      <View style={s.footer}>
+        {paymentConfigLoading ? (
+          <ActivityIndicator style={{ marginBottom: 12 }} color={Colors.primary} />
+        ) : null}
+        <Pressable
           style={[s.payBtn, paying && s.payBtnDisabled]}
-        onPress={handlePayAndInitiate}
-          disabled={paying}>
-        {paying ? (
+          onPress={handlePayAndInitiate}
+          disabled={paying || paymentConfigLoading}>
+          {paying ? (
             <ActivityIndicator color="#fff" />
           ) : (
             <>
               <Ionicons name={isPaid ? 'checkmark-circle' : 'lock-open-outline'} size={20} color="#fff" />
               <Text style={s.payBtnText}>
-                {isPaid
-                  ? 'Payment Done — Continue'
-                  : `Pay ₹${paymentAmountINR.toLocaleString('en-IN')} & continue`}
-          </Text>
+                {isPaid ? 'Continue' : 'Pay'}
+              </Text>
             </>
-        )}
-      </Pressable>
-
-        <Text style={s.secureNote}>
-          <Ionicons name="shield-checkmark-outline" size={12} color="#6b7280" />{' '}
-          Your card and UPI details are processed by Razorpay. Finovert never stores them.
-        </Text>
-    </ScrollView>
+          )}
+        </Pressable>
+        <View style={s.secureFooter}>
+          <Text style={s.secureNote}>
+            Your payment is encrypted and secure. All payments are fully secure and powered by Razorpay.
+          </Text>
+          <View style={s.rzpPoweredRow}>
+            <RazorpayBrandIcon size={16} />
+            <Text style={s.rzpPoweredText}>Razorpay</Text>
+          </View>
+        </View>
+      </View>
+      </View>
     </>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const INDIGO = '#6366f1';
-const CARD_BG = '#ffffff';
-const PAGE_BG = '#f5f5f7';
-
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: PAGE_BG },
-  content: { paddingHorizontal: 16, paddingBottom: 40, paddingTop: 8 },
-
-  // Header
-  header: { paddingVertical: 20, alignItems: 'center', marginBottom: 4 },
-  headerBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#dcfce7', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, marginBottom: 10 },
-  headerBadgeText: { fontSize: 13, fontWeight: '600', color: '#15803d' },
-  headerTitle: { fontSize: 24, fontWeight: '800', color: '#111827', letterSpacing: -0.5, marginBottom: 6 },
-  headerSub: { fontSize: 13, color: '#6b7280', textAlign: 'center', paddingHorizontal: 20 },
-
-  // Card
-  card: { backgroundColor: CARD_BG, borderRadius: 16, marginBottom: 14, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 10 },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: '#111827', flex: 1 },
-  cardHint: { fontSize: 11, color: '#9ca3af', fontStyle: 'italic' },
-
-  emptyText: { padding: 16, fontSize: 14, color: '#6b7280', lineHeight: 21 },
-
-  // Docs row
-  docsRow: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
-  docItem: { flex: 1 },
-  docLabel: { fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 },
-
-  // Upload status
-  uploadStatus: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f9fafb', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#f3f4f6' },
-  uploadDot: { width: 7, height: 7, borderRadius: 4, marginRight: 5 },
-  uploadDotGreen: { backgroundColor: '#22c55e' },
-  uploadDotRed: { backgroundColor: '#ef4444' },
-  uploadStatusText: { fontSize: 12, color: '#6b7280' },
-
-  // Total
-  paySummaryBody: { paddingHorizontal: 16, paddingBottom: 16 },
-  paySummaryTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 },
-  paySummaryDesc: { fontSize: 13, color: '#6b7280', lineHeight: 19, marginBottom: 12 },
-  gatewayWarn: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: '#fffbeb',
-    padding: 12,
-    borderRadius: 12,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#fde68a',
-  },
-  gatewayWarnText: { flex: 1, fontSize: 12, color: '#92400e', lineHeight: 17 },
-  dashboardHint: { fontSize: 11, color: '#9ca3af', marginTop: 12, fontStyle: 'italic' },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, backgroundColor: '#eef2ff', marginTop: 4, borderRadius: 12 },
-  totalLabel: { fontSize: 15, fontWeight: '700', color: '#1e1b4b' },
-  totalValue: { fontSize: 18, fontWeight: '800', color: INDIGO },
-
-  // Info rows
-  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingVertical: 7 },
-  infoText: { fontSize: 13, color: '#374151', flex: 1, lineHeight: 19 },
-
-  // Lock card
-  lockCard: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
-  lockedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingBottom: 16 },
-  lockedChip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fef3c7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
-  lockedChipText: { fontSize: 12, color: '#92400e', fontWeight: '500' },
-
-  // Razorpay payment card
-  rzpInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
-  rzpInfoText: { fontSize: 13, color: '#374151', flex: 1, lineHeight: 19 },
-  rzpMethodRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingBottom: 12, flexWrap: 'wrap' },
-  rzpMethodChip: { backgroundColor: '#eef2ff', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  rzpMethodText: { fontSize: 12, color: '#4338ca', fontWeight: '600' },
-  rzpBadgeRow: { paddingHorizontal: 16, paddingBottom: 14 },
-  rzpBadgeBlue: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', backgroundColor: '#eff6ff', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, borderWidth: 1, borderColor: '#bfdbfe' },
-  rzpBadgeTextBlue: { fontSize: 11, color: '#3395ff', fontWeight: '600' },
-
-  // CTA
-  payBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: INDIGO, paddingVertical: 17, borderRadius: 16, marginBottom: 12, shadowColor: INDIGO, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
-  payBtnDisabled: { backgroundColor: '#c7d2fe', shadowOpacity: 0 },
-  payBtnText: { fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
-  secureNote: { textAlign: 'center', fontSize: 12, color: '#9ca3af', marginBottom: 8 },
-});
-
-// Table
-const tableStyles = StyleSheet.create({
-  table: { borderTopWidth: 1, borderTopColor: '#f3f4f6' },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  rowLabel: { fontSize: 12, color: '#6b7280', fontWeight: '500', width: 120, flexShrink: 0 },
-  rowValueWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  rowValue: { flex: 1, fontSize: 13, color: '#111827', fontWeight: '500' },
-  editBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: '#eef2ff', alignItems: 'center', justifyContent: 'center' },
-});
-
-// Doc thumbnail
-const thumbStyles = StyleSheet.create({
-  wrap: { borderRadius: 10, overflow: 'hidden', backgroundColor: '#f3f4f6', aspectRatio: 1, alignItems: 'center', justifyContent: 'center', position: 'relative' },
-  img: { width: '100%', height: '100%' },
-  overlay: { position: 'absolute', bottom: 5, right: 5, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6, padding: 3 },
-  pdfBadge: { alignItems: 'center', gap: 4 },
-  pdfText: { fontSize: 11, fontWeight: '700', color: '#ef4444' },
-  label: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 10, fontWeight: '600', textAlign: 'center', paddingVertical: 3 },
-  missing: { alignItems: 'center', gap: 4, padding: 16, borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#d1d5db', backgroundColor: '#f9fafb', aspectRatio: 1, justifyContent: 'center' },
-  missingText: { fontSize: 10, color: '#9ca3af' },
-  // Lightbox
-  lightboxBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', alignItems: 'center', justifyContent: 'center' },
-  lightboxImg: { width: '92%', height: '75%' },
-  lightboxClose: { position: 'absolute', top: Platform.OS === 'ios' ? 56 : 24, right: 20 },
-});
-
-// Edit modal
-const editStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: Platform.OS === 'ios' ? 36 : 24, paddingTop: 12 },
-  handle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#e5e7eb', alignSelf: 'center', marginBottom: 16 },
-  title: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 14 },
-  input: { borderWidth: 1.5, borderColor: '#e5e7eb', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, color: '#111827', backgroundColor: '#f9fafb', marginBottom: 16, textAlignVertical: 'top' },
-  btnRow: { flexDirection: 'row', gap: 10 },
-  cancelBtn: { flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 12, backgroundColor: '#f3f4f6' },
-  cancelText: { fontSize: 15, fontWeight: '600', color: '#6b7280' },
-  saveBtn: { flex: 1, paddingVertical: 14, alignItems: 'center', borderRadius: 12, backgroundColor: INDIGO },
-  saveText: { fontSize: 15, fontWeight: '700', color: '#fff' },
-});
-
-// Razorpay WebView modal
-const rzpStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: Platform.OS === 'ios' ? 56 : 24, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#e2e8f0', backgroundColor: '#fff' },
-  headerLeft: { flex: 1 },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
-  headerSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
-  closeBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
-  secureBar: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#eff6ff', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#dbeafe' },
-  secureText: { flex: 1, fontSize: 12, color: '#1e40af', fontWeight: '500', lineHeight: 17 },
-  webview: { flex: 1 },
-  loading: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  loadingText: { marginTop: 12, fontSize: 14, color: '#6b7280' },
-});

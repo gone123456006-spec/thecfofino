@@ -1,408 +1,480 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
-  KeyboardAvoidingView,
-  Linking,
+  Keyboard,
+  LayoutAnimation,
   Platform,
+  UIManager,
+  type KeyboardEvent,
   Pressable,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
-import { makeRedirectUri } from 'expo-auth-session';
-import Constants from 'expo-constants';
+import { Ionicons } from '@expo/vector-icons';
 
 import { HeaderLogo } from '@/constants/assets';
 import { Colors } from '@/constants/theme';
 import { authStyles as createAuthStyles } from '@/styles/auth.styles';
+import { AuthLegalModal, type AuthLegalPage } from '@/components/AuthLegalModal';
+import { normalizeIndianMobile, sanitizeIndianMobileInput } from '@/utils/indian-mobile';
 import { useScalers } from '@/utils/responsive';
 import { useAuth } from '@/contexts/AuthContext';
-import { Ionicons } from '@expo/vector-icons';
 
-let GoogleSignin: any = null;
-let isNativeGoogleSignInAvailable = false;
-let googleStatusCodes: any = null;
+const RESEND_SECONDS = 60;
+const OTP_LEN = 6;
+const { height: SCREEN_H } = Dimensions.get('window');
 
-try {
-  // Expo Go can't use this native module reliably; use AuthSession there.
-  if (Platform.OS !== 'web' && Constants.appOwnership !== 'expo') {
-    const gs = require('@react-native-google-signin/google-signin');
-    GoogleSignin = gs.GoogleSignin;
-    googleStatusCodes = gs.statusCodes;
-    GoogleSignin.configure({
-      webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB,
-      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_IOS,
-    });
-    isNativeGoogleSignInAvailable = true;
-  }
-} catch (error) {
-  isNativeGoogleSignInAvailable = false;
+function OutlinedField({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  editable = true,
+  keyboardType,
+  autoCapitalize,
+  maxLength,
+  styles,
+  noBottomMargin,
+  inputRef,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (t: string) => void;
+  placeholder: string;
+  editable?: boolean;
+  keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'number-pad';
+  autoCapitalize?: 'none' | 'words';
+  maxLength?: number;
+  styles: ReturnType<typeof createAuthStyles>;
+  noBottomMargin?: boolean;
+  inputRef?: React.RefObject<TextInput | null>;
+}) {
+  const [focused, setFocused] = useState(false);
+  const localRef = useRef<TextInput>(null);
+  const ref = inputRef ?? localRef;
+
+  return (
+    <View style={[styles.loginFieldWrap, noBottomMargin && { marginBottom: 0 }]}>
+      <Text style={styles.loginFieldLabel}>{label}</Text>
+      <View style={[styles.loginInputOutlined, focused && editable && styles.loginInputOutlinedFocused]}>
+        <TextInput
+          ref={ref}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={Colors.textMuted}
+          style={[styles.loginInputInner, { paddingLeft: 0 }]}
+          editable={editable}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          autoCorrect={false}
+          maxLength={maxLength}
+          showSoftInputOnFocus
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+        />
+      </View>
+    </View>
+  );
 }
 
-WebBrowser.maybeCompleteAuthSession();
+function OtpInput({
+  value,
+  onChange,
+  editable,
+  styles,
+  sh,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  editable: boolean;
+  styles: ReturnType<typeof createAuthStyles>;
+  sh: (n: number) => number;
+}) {
+  const hiddenRef = useRef<TextInput>(null);
+  const digits = value.padEnd(OTP_LEN, ' ').slice(0, OTP_LEN).split('');
 
-const SUPPORT_MOBILE_DISPLAY = '9153832948';
-const SUPPORT_MOBILE_TEL = '919153832948';
+  return (
+    <View style={{ marginBottom: sh(4) }}>
+      <Pressable onPress={() => editable && hiddenRef.current?.focus()} style={styles.loginOtpRow}>
+        {digits.map((d, i) => (
+          <View key={i} style={[styles.loginOtpBox, d.trim() !== '' && styles.loginOtpBoxFilled]}>
+            <Text style={styles.loginOtpBoxText}>{d.trim()}</Text>
+          </View>
+        ))}
+      </Pressable>
+      <TextInput
+        ref={hiddenRef}
+        value={value}
+        onChangeText={t => onChange(t.replace(/\D/g, '').slice(0, OTP_LEN))}
+        keyboardType="number-pad"
+        maxLength={OTP_LEN}
+        editable={editable}
+        showSoftInputOnFocus
+        style={styles.loginOtpHiddenInput}
+        caretHidden
+      />
+    </View>
+  );
+}
+
+function NextButton({
+  label,
+  onPress,
+  disabled,
+  loading,
+  styles,
+  buttonStyle,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  styles: ReturnType<typeof createAuthStyles>;
+  buttonStyle?: object;
+}) {
+  const off = disabled || loading;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={off}
+      style={({ pressed }) => [
+        styles.loginPrimaryButton,
+        buttonStyle,
+        off && styles.loginPrimaryButtonDisabled,
+        pressed && !off && { opacity: 0.9 },
+      ]}>
+      {loading ? (
+        <ActivityIndicator color={Colors.textOnPrimary} size="small" />
+      ) : (
+        <Text style={[styles.loginPrimaryButtonText, off && styles.loginPrimaryButtonTextDisabled]}>{label}</Text>
+      )}
+    </Pressable>
+  );
+}
 
 export function LoginScreen() {
   const scalers = useScalers();
-  const { sh, sw, ms, height } = scalers;
+  const { sh } = scalers;
   const authStyles = useMemo(() => createAuthStyles(scalers), [scalers]);
-  const { loginWithGoogle, loginWithEmail, signupWithEmail } = useAuth();
+  const { sendEmailOtp, verifyEmailOtpCode, completeEmailLogin } = useAuth();
   const insets = useSafeAreaInsets();
-  const headerHeight = Math.min(height * 0.30, 200);
-
-  // Keep Google button visible but disable it for now (future toggle can re-enable).
-  const googleSignInDisabled = true;
 
   const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB ?? '';
-  const isExpoGo = Constants.appOwnership === 'expo';
+  const [verificationToken, setVerificationToken] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+  const emailInputRef = useRef<TextInput>(null);
+  const [legalPage, setLegalPage] = useState<AuthLegalPage | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const keyboardOpen = keyboardHeight > 0;
 
-  // Use Auth Code + PKCE (Google policy compliant).
-  const discovery = AuthSession.useAutoDiscovery('https://accounts.google.com');
-  const redirectUri =
-    Platform.OS === 'web'
-      ? makeRedirectUri({ scheme: 'finovert' })
-      : 'https://auth.expo.io/@shyamhero/finovert';
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: KeyboardEvent) => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardHeight(e.endCoordinates.height);
+    };
+    const onHide = () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setKeyboardHeight(0);
+    };
+    const showSub = Keyboard.addListener(showEvent, onShow);
+    const hideSub = Keyboard.addListener(hideEvent, onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
-  const [googleRequest, googleResponse, googlePromptAsync] = AuthSession.useAuthRequest(
-    {
-      clientId: webClientId,
-      redirectUri,
-      scopes: ['openid', 'profile', 'email'],
-      responseType: AuthSession.ResponseType.Code,
-      usePKCE: true,
-      extraParams: { prompt: 'select_account' },
-    },
-    discovery,
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setInterval(() => setResendIn(s => (s <= 1 ? 0 : s - 1)), 1000);
+    return () => clearInterval(t);
+  }, [resendIn]);
+
+  const validateGmail = useCallback((value: string) => {
+    return /@(gmail|googlemail)\.com$/i.test(value.toLowerCase().trim());
+  }, []);
+
+  const backFromProfile = useCallback(() => {
+    setEmailVerified(false);
+    setName('');
+    setMobile('');
+  }, []);
+
+  const handleSendOtp = useCallback(async () => {
+    if (!email.trim() || !validateGmail(email)) {
+      Alert.alert('Enter Gmail', 'Use a valid @gmail.com address');
+      return;
+    }
+    setLoading(true);
+    try {
+      await sendEmailOtp(email);
+      setOtpSent(true);
+      setOtp('');
+      setResendIn(RESEND_SECONDS);
+    } catch (error: unknown) {
+      Alert.alert('Could not send code', error instanceof Error ? error.message : 'Try again');
+    } finally {
+      setLoading(false);
+    }
+  }, [email, validateGmail, sendEmailOtp]);
+
+  const handleVerifyOtp = useCallback(async () => {
+    if (otp.length !== OTP_LEN) return;
+    setLoading(true);
+    try {
+      const result = await verifyEmailOtpCode(email, otp);
+      if (result.profileComplete) {
+        setOtpSent(false);
+        setOtp('');
+        setEmailVerified(false);
+        setVerificationToken('');
+        return;
+      }
+      setVerificationToken(result.verificationToken);
+      setEmailVerified(true);
+    } catch (error: unknown) {
+      Alert.alert('Wrong code', error instanceof Error ? error.message : 'Try again');
+    } finally {
+      setLoading(false);
+    }
+  }, [email, otp, verifyEmailOtpCode]);
+
+  const handleMobileChange = useCallback((text: string) => {
+    setMobile(sanitizeIndianMobileInput(text));
+  }, []);
+
+  const handleSignIn = useCallback(async () => {
+    if (!name.trim()) {
+      Alert.alert('Required', 'Enter your full name');
+      return;
+    }
+    const mobileDigits = normalizeIndianMobile(mobile);
+    if (!mobileDigits) {
+      Alert.alert(
+        'Invalid mobile',
+        'Enter a valid 10-digit Indian mobile number (starts with 6, 7, 8, or 9).',
+      );
+      return;
+    }
+    setLoading(true);
+    try {
+      await completeEmailLogin(email, verificationToken, name.trim(), mobileDigits);
+    } catch (error: unknown) {
+      Alert.alert('Sign-in failed', error instanceof Error ? error.message : 'Try again');
+    } finally {
+      setLoading(false);
+    }
+  }, [email, verificationToken, name, mobile, completeEmailLogin]);
+
+  const sheetMinHeight = SCREEN_H * 0.72;
+
+  const heading = emailVerified ? 'Create your profile' : otpSent ? "Verify it's you" : 'Sign in';
+  const subheading = emailVerified
+    ? 'to continue to Finovert'
+    : otpSent
+      ? 'Enter the code from your email'
+      : 'to continue to Finovert';
+
+  const formBody = (
+    <>
+      {!keyboardOpen &&
+        (emailVerified ? (
+          <View style={authStyles.loginTopBar}>
+            <Pressable
+              onPress={backFromProfile}
+              disabled={loading}
+              style={authStyles.loginBackButtonTop}
+              accessibilityLabel="Go back"
+              hitSlop={12}>
+              <Ionicons name="arrow-back" size={24} color={Colors.primary} />
+            </Pressable>
+            <View style={authStyles.loginLogoWrapInBar}>
+              <Image source={HeaderLogo} style={authStyles.loginLogoImage} resizeMode="contain" accessibilityLabel="Finovert" />
+            </View>
+          </View>
+        ) : (
+          <View style={authStyles.loginLogoWrap}>
+            <Image source={HeaderLogo} style={authStyles.loginLogoImage} resizeMode="contain" accessibilityLabel="Finovert" />
+          </View>
+        ))}
+
+      <Text style={authStyles.loginGoogleTitle}>{heading}</Text>
+      <Text style={[authStyles.loginGoogleSubtitle, keyboardOpen && authStyles.loginGoogleSubtitleCompact]}>
+        {subheading}
+      </Text>
+
+      <View style={authStyles.loginFormBlock}>
+              {!emailVerified ? (
+                otpSent ? (
+                  <>
+                    <Text style={authStyles.loginFieldLabel}>Enter code</Text>
+                    <OtpInput value={otp} onChange={setOtp} editable={!loading} styles={authStyles} sh={sh} />
+
+                    <View style={authStyles.loginOtpActionsRow}>
+                      <Pressable
+                        onPress={handleSendOtp}
+                        disabled={loading || resendIn > 0}
+                        style={authStyles.loginTextButton}>
+                        <Text style={[authStyles.loginTextButtonLabel, resendIn > 0 && { opacity: 0.5 }]}>
+                          {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+                        </Text>
+                      </Pressable>
+
+                      <Pressable
+                        onPress={() => {
+                          setOtpSent(false);
+                          setOtp('');
+                          setResendIn(0);
+                        }}
+                        style={authStyles.loginTextButton}>
+                        <Text style={authStyles.loginTextButtonLabel}>Forgot email?</Text>
+                      </Pressable>
+                    </View>
+
+                    <NextButton
+                      label="Next"
+                      onPress={handleVerifyOtp}
+                      disabled={otp.length !== OTP_LEN}
+                      loading={loading}
+                      styles={authStyles}
+                    />
+                  </>
+                ) : (
+                  <View style={authStyles.loginFieldButtonGroup}>
+                    <OutlinedField
+                      label="Email or phone"
+                      value={email}
+                      onChangeText={setEmail}
+                      placeholder="Enter your Gmail"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      editable={!loading}
+                      styles={authStyles}
+                      noBottomMargin
+                      inputRef={emailInputRef}
+                    />
+                    <NextButton
+                      label="Next"
+                      onPress={handleSendOtp}
+                      loading={loading}
+                      styles={authStyles}
+                      buttonStyle={{ marginTop: sh(16) }}
+                    />
+                  </View>
+                )
+              ) : (
+                <>
+                  <OutlinedField
+                    label="Full name"
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="First and last name"
+                    autoCapitalize="words"
+                    editable={!loading}
+                    styles={authStyles}
+                  />
+                  <OutlinedField
+                    label="Mobile number"
+                    value={mobile}
+                    onChangeText={handleMobileChange}
+                    placeholder="e.g. 9876543210"
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                    editable={!loading}
+                    styles={authStyles}
+                  />
+
+                  <NextButton label="Next" onPress={handleSignIn} loading={loading} styles={authStyles} />
+                </>
+              )}
+      </View>
+
+      {!keyboardOpen && (
+        <View style={authStyles.loginFooterLinks}>
+          <Text style={authStyles.loginFooterLink}>English (US)</Text>
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              setLegalPage('help');
+            }}
+            hitSlop={8}>
+            <Text style={authStyles.loginFooterLink}>Help</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              setLegalPage('privacy');
+            }}
+            hitSlop={8}>
+            <Text style={authStyles.loginFooterLink}>Privacy</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Keyboard.dismiss();
+              setLegalPage('terms');
+            }}
+            hitSlop={8}>
+            <Text style={authStyles.loginFooterLink}>Terms</Text>
+          </Pressable>
+        </View>
+      )}
+    </>
   );
 
-  // ── Google Sign-In ──────────────────────────────────────────────────────────
-  const handleGoogleSignIn = useCallback(async (idToken: string | undefined) => {
-    if (!idToken) {
-      Alert.alert('Error', 'Failed to get ID token from Google');
-      return;
-    }
-    setLoading(true);
-    try {
-      await loginWithGoogle(idToken);
-      // Navigation handled by _layout once user state updates
-    } catch (error: any) {
-      Alert.alert('Sign-In Failed', error?.message || 'Failed to sign in with Google');
-    } finally {
-      setLoading(false);
-    }
-  }, [loginWithGoogle]);
-
-  const openWebGoogleAuth = useCallback(async () => {
-    if (!webClientId || !webClientId.trim()) {
-      Alert.alert('Google Sign-In not configured', 'Missing EXPO_PUBLIC_GOOGLE_CLIENT_ID_WEB in frontend/.env');
-      return;
-    }
-    if (!googleRequest) {
-      Alert.alert('Error', 'Google sign-in is not ready yet. Please try again.');
-      return;
-    }
-    const result = await googlePromptAsync();
-    if (result.type !== 'success') return;
-  }, [webClientId, googleRequest, googlePromptAsync]);
-
-  const handleGooglePress = useCallback(async () => {
-    setLoading(true);
-    try {
-      if (!isExpoGo && Platform.OS !== 'web' && isNativeGoogleSignInAvailable) {
-        // Native Google Sign-In
-        await GoogleSignin.hasPlayServices();
-        await GoogleSignin.signIn();
-        const tokens = await GoogleSignin.getTokens();
-        
-        if (tokens.idToken) {
-          await handleGoogleSignIn(tokens.idToken);
-        } else {
-          Alert.alert('Error', 'Missing ID token from Google Sign In');
-        }
-      } else {
-        await openWebGoogleAuth();
-      }
-    } catch (error: any) {
-      if (error.code === 'SIGN_IN_CANCELLED') {
-        // user cancelled the login flow
-      } else if (error.code === 'IN_PROGRESS') {
-        // operation (e.g. sign in) is in progress already
-      } else if (googleStatusCodes && error.code === googleStatusCodes.DEVELOPER_ERROR) {
-        // Wrong native client setup; fall back instead of hard-failing user login.
-        await openWebGoogleAuth();
-      } else {
-        Alert.alert('Error', error?.message || 'Failed to sign in with Google');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [handleGoogleSignIn, isExpoGo, openWebGoogleAuth]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      if (!googleResponse || googleResponse.type !== 'success') return;
-      const code = googleResponse.params?.code;
-      if (!code || !discovery) {
-        Alert.alert('Error', 'Google sign-in failed (missing auth code).');
-        return;
-      }
-      try {
-        const tokenRes = await AuthSession.exchangeCodeAsync(
-          {
-            clientId: webClientId || '',
-            code,
-            redirectUri,
-            extraParams: {
-              code_verifier: googleRequest?.codeVerifier || '',
-            },
-          },
-          discovery,
-        );
-        if (cancelled) return;
-        if (tokenRes.idToken) {
-          await handleGoogleSignIn(tokenRes.idToken);
-        } else {
-          Alert.alert('Error', 'Google sign-in failed (missing ID token).');
-        }
-      } catch (e: any) {
-        if (cancelled) return;
-        Alert.alert('Error', e?.message || 'Google sign-in failed.');
-      }
-    }
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [googleResponse, discovery, webClientId, redirectUri, googleRequest?.codeVerifier, handleGoogleSignIn]);
-
-  // ── Email sign-in / sign-up (Gmail + password) ────────────────────────────
-  const handleEmailAuth = useCallback(async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter your email and password');
-      return;
-    }
-    const normEmail = email.toLowerCase().trim();
-    const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
-    if (!gmailOk) {
-      Alert.alert('Error', 'Use a Gmail address (@gmail.com)');
-      return;
-    }
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
-      return;
-    }
-    if (mode === 'signup') {
-      if (!name.trim()) {
-        Alert.alert('Error', 'Please enter your name');
-        return;
-      }
-      const digits = mobile.replace(/\D/g, '').slice(-10);
-      if (digits.length !== 10) {
-        Alert.alert('Error', 'Enter a valid 10-digit mobile number');
-        return;
-      }
-    }
-    setLoading(true);
-    try {
-      if (mode === 'signup') {
-        await signupWithEmail(name, mobile, email, password);
-      } else {
-        await loginWithEmail(email, password);
-      }
-    } catch (error: any) {
-      Alert.alert(
-        mode === 'signup' ? 'Sign-up failed' : 'Sign-in failed',
-        error?.message || (mode === 'signup' ? 'Could not create account' : 'Failed to sign in'),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [email, password, mode, name, mobile, loginWithEmail, signupWithEmail]);
-
-  const showForgotPasswordHelp = useCallback(() => {
-    Alert.alert(
-      'Forgot password?',
-      `To reset your password, raise a query with customer support on this mobile number:\n\n+91 ${SUPPORT_MOBILE_DISPLAY.slice(0, 5)} ${SUPPORT_MOBILE_DISPLAY.slice(5)}`,
-      [
-        { text: 'OK', style: 'cancel' },
-        {
-          text: 'Call support',
-          onPress: () => {
-            void Linking.openURL(`tel:+${SUPPORT_MOBILE_TEL}`).catch(() => {
-              Alert.alert('Unable to open dialer', `Please call +91 ${SUPPORT_MOBILE_DISPLAY} from your phone.`);
-            });
-          },
-        },
-      ],
-    );
+  const dismissKeyboard = useCallback(() => {
+    Keyboard.dismiss();
   }, []);
 
   return (
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: Colors.gradientDark }}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={[
-          authStyles.loginScrollContent,
-          { paddingBottom: insets.bottom + sh(40) },
-        ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
+    <Pressable style={authStyles.loginPage} onPress={dismissKeyboard}>
+      <AuthLegalModal page={legalPage} onClose={() => setLegalPage(null)} />
+      <StatusBar style="light" backgroundColor={Colors.gradientDark} />
 
-        {/* Header Band */}
-        <View
-          style={[
-            authStyles.loginHeaderBand,
-            {
-              paddingTop: insets.top + sh(20),
-              minHeight: headerHeight,
-              justifyContent: 'center',
-            },
-          ]}>
-          <Text style={authStyles.loginHeaderTitle}>Your Virtual CFO</Text>
-          <Text
-            style={[
-              authStyles.loginHeaderTitle,
-              { fontSize: ms(14), fontWeight: '600', opacity: 0.85, marginTop: sh(6) },
-            ]}>
-            {mode === 'signup' ? 'Create your account' : 'Sign in to continue'}
-          </Text>
-        </View>
-
-        {/* Form Card */}
-        <View style={authStyles.loginFormCard}>
-          {/* Logo */}
-          <View style={authStyles.loginLogoWrap}>
-            <Image
-              source={HeaderLogo}
-              style={authStyles.loginLogoImage}
-              resizeMode="contain"
-              accessibilityLabel="Finovert"
-            />
-          </View>
-
-          {mode === 'signup' ? (
-            <>
-              <View style={{ marginBottom: sh(14) }}>
-                <Text style={authStyles.loginLabel}>Full name</Text>
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Your name"
-                  placeholderTextColor={Colors.textMuted}
-                  style={authStyles.loginInput}
-                  autoCapitalize="words"
-                  editable={!loading}
-                />
-              </View>
-              <View style={{ marginBottom: sh(14) }}>
-                <Text style={authStyles.loginLabel}>Mobile number</Text>
-                <TextInput
-                  value={mobile}
-                  onChangeText={setMobile}
-                  placeholder="10-digit mobile"
-                  placeholderTextColor={Colors.textMuted}
-                  style={authStyles.loginInput}
-                  keyboardType="phone-pad"
-                  editable={!loading}
-                />
-              </View>
-            </>
-          ) : null}
-
-          {/* Email Input */}
-          <View style={{ marginBottom: sh(14) }}>
-            <Text style={authStyles.loginLabel}>Gmail Address</Text>
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Enter your Gmail"
-              placeholderTextColor={Colors.textMuted}
-              style={authStyles.loginInput}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading}
-            />
-          </View>
-
-          {/* Password Input */}
-          <View style={{ marginBottom: sh(24) }}>
-            <Text style={authStyles.loginLabel}>Password</Text>
-            <View style={{ position: 'relative' }}>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Enter your password"
-                placeholderTextColor={Colors.textMuted}
-                style={authStyles.loginInput}
-                secureTextEntry={!showPassword}
-                editable={!loading}
-              />
-              <Pressable
-                onPress={() => setShowPassword(v => !v)}
-                style={{ position: 'absolute', right: sw(12), top: sh(14) }}>
-                <Ionicons
-                  name={showPassword ? 'eye-off' : 'eye'}
-                  size={ms(20)}
-                  color={Colors.textMuted}
-                />
-              </Pressable>
-            </View>
-            {mode === 'signin' ? (
-              <Pressable onPress={showForgotPasswordHelp} disabled={loading} hitSlop={8} style={{ marginTop: sh(8), alignSelf: 'flex-end' }}>
-                <Text style={{ fontSize: ms(14), color: Colors.primary, fontWeight: '600' }}>Forgot password?</Text>
-              </Pressable>
-            ) : null}
-          </View>
-
-          {/* Sign In / Sign up */}
-          <Pressable
-            onPress={handleEmailAuth}
-            disabled={loading}
-            style={({ pressed }) => [
-              authStyles.loginSubmitButton,
-              { opacity: loading ? 0.65 : pressed ? 0.85 : 1 },
-            ]}>
-            {loading ? (
-              <ActivityIndicator size="small" color={Colors.textOnPrimary} />
-            ) : (
-              <Text style={authStyles.loginSubmitText}>
-                {mode === 'signup' ? 'Create account' : 'Sign In'}
-              </Text>
-            )}
-          </Pressable>
-
-          <Pressable
-            onPress={() => setMode(m => (m === 'signin' ? 'signup' : 'signin'))}
-            disabled={loading}
-            style={{ marginTop: sh(14), alignSelf: 'center' }}>
-            <Text style={{ fontSize: ms(14), color: Colors.primary, fontWeight: '600' }}>
-              {mode === 'signin' ? 'New here? Create an account' : 'Already have an account? Sign in'}
-            </Text>
-          </Pressable>
-
-          <Text style={[authStyles.loginSecureNote, { marginTop: sh(28) }]}>
-            Secure sign in · We never share your data
-          </Text>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      <View
+        style={[
+          authStyles.loginSheet,
+          keyboardOpen
+            ? [
+                authStyles.loginSheetAboveKeyboard,
+                {
+                  bottom: keyboardHeight,
+                  paddingBottom: sh(16),
+                },
+              ]
+            : {
+                minHeight: sheetMinHeight,
+                paddingBottom: insets.bottom + sh(16),
+              },
+        ]}>
+        <ScrollView
+          contentContainerStyle={authStyles.loginSheetInner}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+          bounces={false}>
+          {formBody}
+        </ScrollView>
+      </View>
+    </Pressable>
   );
 }

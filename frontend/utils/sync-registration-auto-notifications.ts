@@ -18,6 +18,8 @@ export type AddNotificationFn = (input: {
   id?: string;
 }) => void;
 
+const TRACKING_COMPLETE = new Set(['approved', 'completed']);
+
 function filingLabel(reg: MyRegistrationItem): string {
   const name = reg.proposedName1?.trim() || 'Your filing';
   return reg.caseId ? `${name} · ${reg.caseId}` : name;
@@ -37,6 +39,11 @@ export async function syncRegistrationAutoNotifications(
       const newSteps = resolveStepsDone(eff);
       const payment = reg.paymentStatus || 'unpaid';
       const prev = snapshot[regId];
+
+      if (TRACKING_COMPLETE.has(eff)) {
+        snapshot[regId] = { eff, payment };
+        continue;
+      }
 
       if (!prev) {
         snapshot[regId] = { eff, payment };

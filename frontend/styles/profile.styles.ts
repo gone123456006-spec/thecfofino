@@ -11,16 +11,25 @@ export const profileStyles = StyleSheet.create({
     paddingBottom: sh(32),
   },
 
-  // ─── App bar ───────────────────────────────────────────────────────────
+  // ─── App bar (sticky — sits outside ScrollView) ─────────────────────────
   appBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: sw(16),
-    paddingTop: sh(12),
-    paddingBottom: sh(14),
-    borderBottomWidth: 1,
+    paddingBottom: sh(12),
+    backgroundColor: Colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.divider,
+    zIndex: 10,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+  },
+  scroll: {
+    flex: 1,
   },
   appBarPlaceholder: {
     width: sw(40),

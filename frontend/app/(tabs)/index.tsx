@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
+import { Image as ExpoImage } from 'expo-image';
 import Animated, {
   interpolate,
   useAnimatedStyle,
@@ -30,6 +31,7 @@ import {
   services,
   tools,
   type Segment,
+  type ServiceId,
   type ServiceItem,
   type ToolItem,
 } from '../../data/home.data';
@@ -44,10 +46,29 @@ import {
   loadCompanyRegistrationState,
 } from '@/utils/company-registration-draft';
 import {
+  effectiveRegistrationStatus,
   isRegistrationTrackingEnded,
   registrationStatusLabel,
 } from '@/utils/company-registration-status';
+
+type StatusChipTone = 'progress' | 'success' | 'neutral' | 'warning' | 'error';
+
+function registrationStatusTone(reg: MyRegistrationItem): StatusChipTone {
+  const key = effectiveRegistrationStatus(reg);
+  if (key === 'completed' || key === 'approved') return 'success';
+  if (key === 'rejected') return 'error';
+  if (key === 'pending' || key === 'submitted' || key === 'draft') return 'warning';
+  return 'progress';
+}
 import { useSyncRegistrationAutoNotifications } from '@/hooks/useSyncRegistrationAutoNotifications';
+import { UpdateAvailableBanner } from '@/components/UpdateAvailableBanner';
+import {
+  clearRegistrationsCache,
+  getCachedRegistrations,
+  registrationsCacheUserKey,
+  setCachedRegistrations,
+} from '@/utils/registrations-cache';
+import { preloadServiceImages } from '@/utils/preload-service-images';
 
 const HERO_IMAGES = [
   require('../../assets/images/hero-1.png'),
@@ -56,11 +77,20 @@ const HERO_IMAGES = [
   require('../../assets/images/hero-4.png'),
 ];
 
+const SERVICE_IMAGE_SCALE: Record<ServiceId, number> = {
+  'gst-filing': 3.05,
+  'company-registration': 2.25,
+  'itr-filing': 1.9,
+  'tds-filing': 1.65,
+  'cfo-services': 1.9,
+  'invoice-financing': 1.75,
+};
+
 
 export default function HomeScreen() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
-  const { getToken } = useAuth();
+  const { getToken, user, sessionGeneration } = useAuth();
   const scalers = useScalers();
   const { sw, sh } = scalers;
   const insets = useSafeAreaInsets();
@@ -69,7 +99,10 @@ export default function HomeScreen() {
     useState<CompanyRegistrationStatus>('not_started');
   const [serverStatus, setServerStatus] = useState<string | null>(null);
   const [serverPaymentStatus, setServerPaymentStatus] = useState<string | null>(null);
-  const [myRegistrations, setMyRegistrations] = useState<MyRegistrationItem[]>([]);
+  const regUserKey = registrationsCacheUserKey(user);
+  const [myRegistrations, setMyRegistrations] = useState<MyRegistrationItem[]>(() =>
+    getCachedRegistrations(regUserKey),
+  );
   const [heroIndex, setHeroIndex] = useState(0);
   const heroScrollRef = useRef<ScrollView>(null);
   const { styles, sizes, width } = useMemo(
@@ -77,6 +110,47 @@ export default function HomeScreen() {
     [scalers],
   );
   const heroLeftWidth = sizes.heroLeftWidth ?? width * 0.58;
+
+  const renderStatusIndicator = (label: string, tone: StatusChipTone) => {
+    const dotStyle =
+      tone === 'success'
+        ? styles.statusDotSuccess
+        : tone === 'warning'
+          ? styles.statusDotWarning
+          : tone === 'error'
+            ? styles.statusDotError
+            : tone === 'neutral'
+              ? null
+              : styles.statusDotActive;
+    const textStyle =
+      tone === 'success'
+        ? styles.statusIndicatorTextSuccess
+        : tone === 'warning'
+          ? styles.statusIndicatorTextWarning
+          : tone === 'error'
+            ? styles.statusIndicatorTextError
+            : tone === 'neutral'
+              ? styles.statusIndicatorTextMuted
+              : styles.statusIndicatorText;
+    return (
+      <View style={styles.statusIndicatorRow}>
+        <View style={[styles.statusDot, dotStyle]} />
+        <Text style={[styles.statusIndicatorText, textStyle]} numberOfLines={2}>
+          {label}
+        </Text>
+      </View>
+    );
+  };
+
+  useEffect(() => {
+    void preloadServiceImages();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void preloadServiceImages();
+    }, []),
+  );
 
   // Auto-advance hero carousel every 3.5s
   useEffect(() => {
@@ -90,40 +164,64 @@ export default function HomeScreen() {
     return () => clearInterval(id);
   }, [heroLeftWidth]);
 
-  const refreshRegistration = useCallback(async () => {
-    const state = await loadCompanyRegistrationState();
-    setServerStatus(null);
-    setServerPaymentStatus(null);
-    setMyRegistrations([]);
-    let nextStatus: CompanyRegistrationStatus = state.status;
+  const refreshRegistration = useCallback(
+    async (silent = false) => {
+      const userKey = registrationsCacheUserKey(user);
+      const state = await loadCompanyRegistrationState();
+      let nextStatus: CompanyRegistrationStatus = state.status;
 
-    try {
-      const token = await getToken();
-      if (token) {
-        const list = await fetchMyRegistrations(token);
-        setMyRegistrations(list);
-        const latest = list[0];
-        if (latest?.status) setServerStatus(latest.status);
-        if (latest?.paymentStatus) setServerPaymentStatus(latest.paymentStatus);
+      try {
+        const token = await getToken();
+        if (token) {
+          const list = await fetchMyRegistrations(token);
+          setMyRegistrations(list);
+          setCachedRegistrations(userKey, list);
+          const latest = list[0];
+          if (latest?.status) setServerStatus(latest.status);
+          if (latest?.paymentStatus) setServerPaymentStatus(latest.paymentStatus);
 
-        const paid = latest?.paymentStatus === 'paid';
-        const hasLocalDraft = Boolean(state.draft);
-        if (paid && !hasLocalDraft && (state.status === 'not_started' || state.status === 'draft')) {
-          nextStatus = 'paid';
+          const paid = latest?.paymentStatus === 'paid';
+          const hasLocalDraft = Boolean(state.draft);
+          if (paid && !hasLocalDraft && (state.status === 'not_started' || state.status === 'draft')) {
+            nextStatus = 'paid';
+          }
+        } else if (!silent) {
+          setMyRegistrations([]);
+          setServerStatus(null);
+          setServerPaymentStatus(null);
         }
+      } catch {
+        /* keep last cached list on screen */
       }
-    } catch (_) {
-      /* keep local */
-    }
 
-    setRegistrationStatus(nextStatus);
-  }, [getToken]);
+      setRegistrationStatus(nextStatus);
+    },
+    [getToken, user?.email, user?.id],
+  );
 
   useFocusEffect(
     useCallback(() => {
-      void refreshRegistration();
-    }, [refreshRegistration]),
+      const userKey = registrationsCacheUserKey(user);
+      const cached = getCachedRegistrations(userKey);
+      if (cached.length > 0) {
+        setMyRegistrations(cached);
+        const latest = cached[0];
+        if (latest?.status) setServerStatus(latest.status);
+        if (latest?.paymentStatus) setServerPaymentStatus(latest.paymentStatus);
+      }
+      void refreshRegistration(true);
+    }, [refreshRegistration, user?.id, user?.email]),
   );
+
+  useEffect(() => {
+    clearRegistrationsCache();
+    const userKey = registrationsCacheUserKey(user);
+    setMyRegistrations(getCachedRegistrations(userKey));
+    setServerStatus(null);
+    setServerPaymentStatus(null);
+    setRegistrationStatus('not_started');
+    void refreshRegistration(true);
+  }, [sessionGeneration, user?.email, refreshRegistration]);
 
   const syncRegistrationAutoNotifications = useSyncRegistrationAutoNotifications();
   useEffect(() => {
@@ -341,6 +439,8 @@ export default function HomeScreen() {
           showsVerticalScrollIndicator={false}
           bounces={false}>
 
+          <UpdateAvailableBanner />
+
           {/* ── Topics (below navbar & Your Virtual CFO) ─────────────────── */}
           <View style={styles.topicsSection}>
             <View style={styles.topicsBgWrap} pointerEvents="none">
@@ -428,6 +528,7 @@ export default function HomeScreen() {
           <View style={styles.segmentWrap}>
             {segmentLabels.map((label: Segment) => {
               const isActive = label === activeSegment;
+              const statusBadgeCount = label === 'Status' ? activeHomeRegs.length : 0;
               return (
                 <Pressable
                   key={label}
@@ -440,151 +541,190 @@ export default function HomeScreen() {
                   <Text style={[styles.segmentLabel, isActive && styles.segmentLabelActive]}>
                     {label}
                   </Text>
+                  {statusBadgeCount > 0 ? (
+                    <View style={styles.segmentNotifyBadge}>
+                      <Text style={styles.segmentNotifyBadgeText}>
+                        {statusBadgeCount > 99 ? '99+' : statusBadgeCount}
+                      </Text>
+                    </View>
+                  ) : null}
                 </Pressable>
               );
             })}
           </View>
 
-          {/* ── Segment content: Status = Company Registration card; else Our Services + Tools ─ */}
-          {activeSegment === 'Status' ? (
-            <View style={styles.segmentContent}>
-              <View style={styles.statusCardWrap}>
-                <Text style={styles.statusCardTitle}>Filings</Text>
-                <Text style={styles.statusCardSubtitle}>
-                  Add a new company or open an existing filing.
-                </Text>
+          {/* ── Segment panels stay mounted so service images stay cached ─ */}
+          <View
+            style={[
+              styles.segmentContent,
+              activeSegment !== 'Status' && styles.segmentHidden,
+            ]}>
+              <Text style={styles.statusSectionTitle}>Filings</Text>
+              <Text style={styles.statusSectionSub}>Add a new company or open an existing filing.</Text>
 
+              <View style={styles.googleCard}>
                 <Pressable
-                  style={({ pressed }) => [styles.statusNewRegHero, pressed && styles.segmentPressed]}
+                  style={({ pressed }) => [styles.googleListRow, pressed && styles.segmentPressed]}
                   onPress={() => router.push('/company-registration')}
                   accessibilityLabel="Start new company registration">
-                  <View style={styles.statusNewRegIconWrap}>
-                    <Ionicons name="add" size={26} color={Colors.textOnPrimary} />
+                  <View style={styles.googleIconWrapBlue}>
+                    <Ionicons name="add" size={22} color="#1a73e8" />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.statusNewRegTitle}>New registration</Text>
-                    <Text style={styles.statusNewRegSub}>Starts a separate application</Text>
+                  <View style={styles.googleListBody}>
+                    <Text style={styles.googleListTitle}>New registration</Text>
+                    <Text style={styles.googleListSub}>Starts a separate application</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+                  <Ionicons name="chevron-forward" size={20} color="#80868b" />
                 </Pressable>
 
                 {myRegistrations.length > 0 ? (
                   <>
                     {activeHomeRegs.length > 0 ? (
                       <>
-                        <Text style={styles.statusRegListTitle}>Active</Text>
-                        {activeHomeRegs.map((reg) => (
-                          <Pressable
-                            key={reg._id}
-                            style={({ pressed }) => [
-                              styles.statusRegCard,
-                              styles.statusRegCardActive,
-                              pressed && styles.segmentPressed,
-                            ]}
-                            onPress={() => router.push(`/company-registration-tracking/${reg._id}` as any)}>
-                            <View style={styles.statusRegCardRow}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.statusRegName} numberOfLines={2}>
+                        <View style={styles.googleListDivider} />
+                        <Text style={styles.googleSectionLabel}>ACTIVE</Text>
+                        {activeHomeRegs.map((reg, index) => (
+                          <View key={reg._id}>
+                            {index > 0 ? <View style={styles.googleListDividerInset} /> : null}
+                            <Pressable
+                              style={({ pressed }) => [
+                                styles.googleListRow,
+                                styles.googleListRowUnread,
+                                pressed && styles.segmentPressed,
+                              ]}
+                              onPress={() =>
+                                router.push(`/company-registration-tracking/${reg._id}` as any)
+                              }>
+                              <View style={styles.googleIconWrapBlue}>
+                                <Ionicons name="business-outline" size={20} color="#1a73e8" />
+                              </View>
+                              <View style={styles.googleListBody}>
+                                <Text style={styles.googleListTitle} numberOfLines={2}>
                                   {reg.proposedName1?.trim() || 'Company registration'}
                                 </Text>
-                                <Text style={styles.statusRegMeta} numberOfLines={2}>
-                                  {reg.caseId ? `${reg.caseId} · ` : ''}
-                                  {registrationStatusLabel(reg)}
-                                </Text>
+                                {reg.caseId ? (
+                                  <Text style={styles.googleListSub} numberOfLines={1}>
+                                    {reg.caseId}
+                                  </Text>
+                                ) : null}
+                                {renderStatusIndicator(
+                                  registrationStatusLabel(reg),
+                                  registrationStatusTone(reg),
+                                )}
                               </View>
-                              <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-                            </View>
-                          </Pressable>
+                              <Ionicons name="chevron-forward" size={20} color="#80868b" />
+                            </Pressable>
+                          </View>
                         ))}
                       </>
                     ) : null}
                     {endedHomeRegs.length > 0 ? (
                       <>
+                        <View style={styles.googleListDivider} />
                         <Text
                           style={[
-                            styles.statusRegListTitle,
-                            activeHomeRegs.length > 0 && styles.statusRegListTitleSpaced,
+                            styles.googleSectionLabel,
+                            activeHomeRegs.length > 0 && styles.googleSectionLabelSpaced,
                           ]}>
-                          Completed
+                          COMPLETED
                         </Text>
-                        {endedHomeRegs.map((reg) => (
-                          <Pressable
-                            key={reg._id}
-                            style={({ pressed }) => [
-                              styles.statusRegCard,
-                              styles.statusRegCardDone,
-                              pressed && styles.segmentPressed,
-                            ]}
-                            onPress={() => router.push(`/company-registration-tracking/${reg._id}` as any)}>
-                            <View style={styles.statusRegCardRow}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={styles.statusRegName} numberOfLines={1}>
+                        {endedHomeRegs.map((reg, index) => (
+                          <View key={reg._id}>
+                            {index > 0 ? <View style={styles.googleListDividerInset} /> : null}
+                            <Pressable
+                              style={({ pressed }) => [styles.googleListRow, pressed && styles.segmentPressed]}
+                              onPress={() =>
+                                router.push(`/company-registration-tracking/${reg._id}` as any)
+                              }>
+                              <View style={styles.googleIconWrapGreen}>
+                                <Ionicons name="checkmark-circle" size={20} color="#188038" />
+                              </View>
+                              <View style={styles.googleListBody}>
+                                <Text style={styles.googleListTitle} numberOfLines={1}>
                                   {reg.proposedName1?.trim() || 'Company registration'}
                                 </Text>
-                                <Text style={styles.statusRegMeta} numberOfLines={2}>
-                                  {reg.caseId ? `${reg.caseId} · ` : ''}
-                                  {registrationStatusLabel(reg)}
-                                </Text>
+                                {reg.caseId ? (
+                                  <Text style={styles.googleListSub} numberOfLines={1}>
+                                    {reg.caseId}
+                                  </Text>
+                                ) : null}
+                                {renderStatusIndicator(
+                                  registrationStatusLabel(reg),
+                                  registrationStatusTone(reg),
+                                )}
                               </View>
-                              <Ionicons name="checkmark-circle-outline" size={22} color={Colors.primary} />
-                            </View>
-                          </Pressable>
+                              <Ionicons name="chevron-forward" size={20} color="#80868b" />
+                            </Pressable>
+                          </View>
                         ))}
                       </>
                     ) : null}
+                    <View style={styles.googleListDivider} />
                     <Pressable
-                      style={styles.statusCardBtn}
+                      style={({ pressed }) => [styles.googleTextBtn, pressed && styles.segmentPressed]}
                       onPress={() => router.push('/company-registration-upload-tracking')}>
-                      <Text style={styles.statusCardBtnText}>All filings</Text>
+                      <Text style={styles.googleTextBtnLabel}>View all filings</Text>
                     </Pressable>
                   </>
                 ) : (
                   <>
-                    <View style={styles.statusCardRow}>
-                      <Ionicons name="time-outline" size={18} color={Colors.primary} />
-                      <Text style={styles.statusCardText}>{getRegistrationStatusLabel()}</Text>
+                    <View style={styles.googleListDivider} />
+                    <View style={styles.googleEmptyBlock}>
+                      <View style={styles.googleIconWrapGrey}>
+                        <Ionicons name="document-text-outline" size={22} color="#5f6368" />
+                      </View>
+                      <Text style={styles.googleEmptyText}>{getRegistrationStatusLabel()}</Text>
                     </View>
-                    <Pressable style={styles.statusCardBtn} onPress={openRegistrationFlow}>
-                      <Text style={styles.statusCardBtnText}>
+                    <Pressable
+                      style={({ pressed }) => [styles.googlePrimaryBtn, pressed && styles.segmentPressed]}
+                      onPress={openRegistrationFlow}>
+                      <Text style={styles.googlePrimaryBtnText}>
                         {registrationStatus === 'paid' ||
                         registrationStatus === 'upload_in_progress' ||
                         registrationStatus === 'completed'
                           ? 'View tracking'
-                          : 'Open Process'}
+                          : 'Continue registration'}
                       </Text>
                     </Pressable>
                   </>
                 )}
               </View>
-            </View>
-          ) : activeSegment === 'Transaction' ? (
-            <View style={styles.segmentContent}>
-              <View style={styles.statusCardWrap}>
-                <Text style={styles.statusCardTitle}>Transactions</Text>
-                <Text style={styles.statusCardSubtitle}>
-                  Payment confirmations when you complete checkout in the app.
-                </Text>
+          </View>
+
+          <View
+            style={[
+              styles.segmentContent,
+              activeSegment !== 'Transaction' && styles.segmentHidden,
+            ]}>
+              <Text style={styles.statusSectionTitle}>Transactions</Text>
+              <Text style={styles.statusSectionSub}>
+                Payment confirmations when you complete checkout in the app.
+              </Text>
+              <View style={styles.googleCard}>
                 <Pressable
-                  style={({ pressed }) => [styles.statusNewRegHero, pressed && styles.segmentPressed]}
+                  style={({ pressed }) => [styles.googleListRow, pressed && styles.segmentPressed]}
                   onPress={() => router.push('/transactions')}
                   accessibilityLabel="Open payment messages">
-                  <View style={styles.statusNewRegIconWrap}>
-                    <Ionicons name="receipt-outline" size={24} color={Colors.textOnPrimary} />
+                  <View style={styles.googleIconWrapGrey}>
+                    <Ionicons name="receipt-outline" size={22} color="#5f6368" />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.statusNewRegTitle}>Payment messages</Text>
-                    <Text style={styles.statusNewRegSub}>
+                  <View style={styles.googleListBody}>
+                    <Text style={styles.googleListTitle}>Payment messages</Text>
+                    <Text style={styles.googleListSub}>
                       {paymentTransactions.length > 0
-                        ? `${paymentTransactions.length} confirmation${paymentTransactions.length === 1 ? '' : 's'} · tap to view`
-                        : 'Nothing here yet — messages appear after you pay'}
+                        ? `${paymentTransactions.length} confirmation${paymentTransactions.length === 1 ? '' : 's'}`
+                        : 'Appears after you complete payment'}
                     </Text>
+                    {paymentTransactions.length > 0
+                      ? renderStatusIndicator('Payments recorded', 'success')
+                      : renderStatusIndicator('No payments yet', 'neutral')}
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+                  <Ionicons name="chevron-forward" size={20} color="#80868b" />
                 </Pressable>
               </View>
-            </View>
-          ) : (
-            <>
+          </View>
+
+          <View style={activeSegment !== 'Overview' ? styles.segmentHidden : undefined}>
               {/* ── Our Services (blur + shine) ─────────────────────────────── */}
              <View style={styles.servicesSectionWrap}>
                 <View style={styles.sectionHeader}>
@@ -613,13 +753,16 @@ export default function HomeScreen() {
                       ]}>
                       <View style={[styles.cardIconWrap, service.image ? { backgroundColor: 'transparent' } : null]}>
                         {service.image ? (
-                          <Image
+                          <ExpoImage
                             source={service.image}
                             style={{
-                              width: sizes.cardIcon * (service.id === 'gst-filing' ? 3.05 : service.id === 'company-registration' ? 2.25 : service.id === 'itr-filing' ? 1.9 : service.id === 'tds-filing' ? 1.65 : service.id === 'cfo-services' ? 1.9 : service.id === 'invoice-financing' ? 1.75 : 2.0),
-                              height: sizes.cardIcon * (service.id === 'gst-filing' ? 3.05 : service.id === 'company-registration' ? 2.25 : service.id === 'itr-filing' ? 1.9 : service.id === 'tds-filing' ? 1.65 : service.id === 'cfo-services' ? 1.9 : service.id === 'invoice-financing' ? 1.75 : 2.0),
+                              width: sizes.cardIcon * SERVICE_IMAGE_SCALE[service.id],
+                              height: sizes.cardIcon * SERVICE_IMAGE_SCALE[service.id],
                             }}
-                            resizeMode="contain"
+                            contentFit="contain"
+                            cachePolicy="memory-disk"
+                            transition={0}
+                            recyclingKey={`service-${service.id}`}
                             accessibilityLabel={service.title}
                           />
                         ) : (
@@ -666,8 +809,7 @@ export default function HomeScreen() {
                   ))}
                 </View>
               </View>
-            </>
-          )}
+          </View>
         </ScrollView>
       </View>
     </View>

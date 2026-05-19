@@ -7,7 +7,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
@@ -15,21 +14,47 @@ import {
 import { fetchMyRegistrations, type MyRegistrationItem } from '@/api/company-registration';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
-import { isRegistrationTrackingEnded, registrationStatusLabel } from '@/utils/company-registration-status';
+import { companyRegistrationUploadTrackingStyles as styles } from '@/styles/company-registration-upload-tracking.styles';
+import {
+  effectiveRegistrationStatus,
+  isRegistrationTrackingEnded,
+  registrationStatusLabel,
+} from '@/utils/company-registration-status';
 import { useSyncRegistrationAutoNotifications } from '@/hooks/useSyncRegistrationAutoNotifications';
+import {
+  getCachedRegistrations,
+  registrationsCacheUserKey,
+  setCachedRegistrations,
+} from '@/utils/registrations-cache';
 
 const POLL_INTERVAL_MS = 15_000;
-const HAIR = StyleSheet.hairlineWidth;
 
 function sortByNewest(a: MyRegistrationItem, b: MyRegistrationItem): number {
   return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 }
 
+function statusChipStyle(reg: MyRegistrationItem) {
+  const key = effectiveRegistrationStatus(reg);
+  if (key === 'completed' || key === 'approved') {
+    return { chip: styles.chipSuccess, text: styles.chipSuccessText };
+  }
+  if (key === 'rejected') return { chip: styles.chipWarning, text: styles.chipWarningText };
+  if (key === 'pending' || key === 'submitted') {
+    return { chip: styles.chipWarning, text: styles.chipWarningText };
+  }
+  return { chip: styles.chipProgress, text: styles.chipProgressText };
+}
+
 export default function CompanyRegistrationUploadTrackingScreen() {
   const router = useRouter();
-  const { getToken } = useAuth();
-  const [registrations, setRegistrations] = useState<MyRegistrationItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { getToken, user } = useAuth();
+  const regUserKey = registrationsCacheUserKey(user);
+  const [registrations, setRegistrations] = useState<MyRegistrationItem[]>(() =>
+    getCachedRegistrations(regUserKey),
+  );
+  const [loading, setLoading] = useState(
+    () => getCachedRegistrations(regUserKey).length === 0,
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isLivePolling, setIsLivePolling] = useState(false);
@@ -47,15 +72,16 @@ export default function CompanyRegistrationUploadTrackingScreen() {
         }
         const list = await fetchMyRegistrations(token);
         setRegistrations(list);
+        setCachedRegistrations(registrationsCacheUserKey(user), list);
         setLastUpdated(new Date());
-      } catch (_) {
+      } catch {
         /* keep */
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [getToken],
+    [getToken, user?.email, user?.id],
   );
 
   const startPolling = useCallback(() => {
@@ -76,10 +102,16 @@ export default function CompanyRegistrationUploadTrackingScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void fetchList();
+      const userKey = registrationsCacheUserKey(user);
+      const cached = getCachedRegistrations(userKey);
+      if (cached.length > 0) {
+        setRegistrations(cached);
+        setLoading(false);
+      }
+      void fetchList(cached.length > 0);
       startPolling();
       return () => stopPolling();
-    }, [fetchList, startPolling, stopPolling]),
+    }, [fetchList, startPolling, stopPolling, user?.id, user?.email]),
   );
 
   const { activeRegs, endedRegs } = useMemo(() => {
@@ -103,11 +135,44 @@ export default function CompanyRegistrationUploadTrackingScreen() {
     router.push(`/company-registration-tracking/${reg._id}` as any);
   };
 
+  const renderFilingRow = (reg: MyRegistrationItem, ended: boolean) => {
+    const chip = statusChipStyle(reg);
+    return (
+      <Pressable
+        key={reg._id}
+        style={({ pressed }) => [styles.googleListRow, pressed && styles.pressed]}
+        onPress={() => openTracking(reg)}
+        accessibilityRole="button">
+        <View style={ended ? styles.googleIconWrapGreen : styles.googleIconWrapBlue}>
+          <Ionicons
+            name={ended ? 'checkmark-circle' : 'business-outline'}
+            size={20}
+            color={ended ? '#188038' : '#1a73e8'}
+          />
+        </View>
+        <View style={styles.googleListBody}>
+          <Text style={styles.googleListTitle} numberOfLines={2}>
+            {reg.proposedName1?.trim() || 'Company registration'}
+          </Text>
+          {reg.caseId ? (
+            <Text style={styles.googleListSub} numberOfLines={1}>
+              {reg.caseId}
+            </Text>
+          ) : null}
+          <View style={[styles.statusChip, chip.chip]}>
+            <Text style={[styles.statusChipText, chip.text]}>{registrationStatusLabel(reg)}</Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#80868b" />
+      </Pressable>
+    );
+  };
+
   if (loading && registrations.length === 0) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={Colors.primary} />
-        <Text style={styles.loadingText}>Loading…</Text>
+        <Text style={styles.loadingText}>Loading filings…</Text>
       </View>
     );
   }
@@ -124,185 +189,91 @@ export default function CompanyRegistrationUploadTrackingScreen() {
             setRefreshing(true);
             void fetchList();
           }}
-          colors={[Colors.primary]}
-          tintColor={Colors.primary}
+          colors={['#1a73e8']}
+          tintColor="#1a73e8"
         />
       }>
-      <Text style={styles.pageTitle}>Filings</Text>
       <Text style={styles.pageSub}>Add a new company or open an existing filing.</Text>
 
-      <Pressable
-        style={({ pressed }) => [styles.newRow, pressed && styles.pressed]}
-        onPress={() => router.push('/company-registration')}
-        accessibilityLabel="Start new company registration">
-        <View style={styles.newIconCircle}>
-          <Ionicons name="add" size={26} color={Colors.textOnPrimary} />
-        </View>
-        <View style={styles.newTextCol}>
-          <Text style={styles.newTitle}>New registration</Text>
-          <Text style={styles.newCaption}>Starts a separate application</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-      </Pressable>
-
-      {registrations.length === 0 ? (
-        <View style={styles.emptyBox}>
-          <Text style={styles.emptyTitle}>No filings yet</Text>
-          <Text style={styles.emptySub}>Use New registration above.</Text>
+      {hasActive ? (
+        <View style={[styles.liveChip, !isLivePolling && styles.liveChipOff]}>
+          <View style={[styles.liveDot, !isLivePolling && styles.liveDotOff]} />
+          <Text style={[styles.liveChipText, !isLivePolling && styles.liveChipTextOff]}>
+            {isLivePolling ? 'Live updates on' : 'Updates paused'}
+          </Text>
         </View>
       ) : null}
 
-      {activeRegs.length > 0 ? (
-        <>
-          <Text style={styles.section}>Active</Text>
-          {activeRegs.map((reg) => (
-            <Pressable
-              key={reg._id}
-              style={({ pressed }) => [styles.listCard, styles.listCardActive, pressed && styles.pressed]}
-              onPress={() => openTracking(reg)}>
-              <View style={styles.listCardTop}>
-                <Text style={styles.listTitle} numberOfLines={2}>
-                  {reg.proposedName1?.trim() || 'Company'}
-                </Text>
-                <View style={[styles.pill, !isLivePolling && styles.pillMuted]}>
-                  <View style={[styles.pillDot, !isLivePolling && styles.pillDotMuted]} />
-                  <Text style={[styles.pillLabel, !isLivePolling && styles.pillLabelMuted]}>
-                    {hasActive && isLivePolling ? 'Updating' : 'Idle'}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.listMeta}>
-                {reg.caseId ? `${reg.caseId} · ` : ''}
-                {registrationStatusLabel(reg)}
-              </Text>
-            </Pressable>
-          ))}
-        </>
-      ) : null}
+      <View style={styles.googleCard}>
+        <Pressable
+          style={({ pressed }) => [styles.googleListRow, pressed && styles.pressed]}
+          onPress={() => router.push('/company-registration')}
+          accessibilityLabel="Start new company registration">
+          <View style={styles.googleIconWrapBlue}>
+            <Ionicons name="add" size={22} color="#1a73e8" />
+          </View>
+          <View style={styles.googleListBody}>
+            <Text style={styles.googleListTitle}>New registration</Text>
+            <Text style={styles.googleListSub}>Starts a separate application</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#80868b" />
+        </Pressable>
 
-      {endedRegs.length > 0 ? (
-        <>
-          <Text style={[styles.section, activeRegs.length > 0 && styles.sectionSpaced]}>Completed</Text>
-          {endedRegs.map((reg) => (
-            <Pressable
-              key={reg._id}
-              style={({ pressed }) => [styles.listCard, pressed && styles.pressed]}
-              onPress={() => openTracking(reg)}>
-              <View style={styles.listCardTop}>
-                <Text style={styles.listTitle} numberOfLines={1}>
-                  {reg.proposedName1?.trim() || 'Company'}
-                </Text>
-                <Ionicons name="checkmark-circle-outline" size={22} color={Colors.primary} />
-              </View>
-              <Text style={styles.listMeta}>
-                {reg.caseId ? `${reg.caseId} · ` : ''}
-                {registrationStatusLabel(reg)}
-              </Text>
-            </Pressable>
-          ))}
-        </>
-      ) : null}
+        {registrations.length === 0 ? (
+          <>
+            <View style={styles.googleListDivider} />
+            <View style={styles.emptyInline}>
+              <Ionicons name="folder-open-outline" size={32} color="#80868b" />
+              <Text style={styles.emptyTitle}>No filings yet</Text>
+              <Text style={styles.emptySub}>Tap New registration above to get started.</Text>
+            </View>
+          </>
+        ) : (
+          <>
+            {activeRegs.length > 0 ? (
+              <>
+                <View style={styles.googleListDivider} />
+                <Text style={styles.googleSectionLabel}>IN PROGRESS</Text>
+                {activeRegs.map((reg, index) => (
+                  <View key={reg._id}>
+                    {index > 0 ? <View style={styles.googleListDividerInset} /> : null}
+                    {renderFilingRow(reg, false)}
+                  </View>
+                ))}
+              </>
+            ) : null}
+            {endedRegs.length > 0 ? (
+              <>
+                <View style={styles.googleListDivider} />
+                <Text style={styles.googleSectionLabel}>COMPLETED</Text>
+                {endedRegs.map((reg, index) => (
+                  <View key={reg._id}>
+                    {index > 0 ? <View style={styles.googleListDividerInset} /> : null}
+                    {renderFilingRow(reg, true)}
+                  </View>
+                ))}
+              </>
+            ) : null}
+          </>
+        )}
+      </View>
 
       {lastUpdated ? (
-        <Text style={styles.synced}>
-          {lastUpdated.toLocaleTimeString()}
-          {hasActive && isLivePolling ? ' · syncs periodically' : ''}
+        <Text style={styles.footerNote}>
+          Last updated {lastUpdated.toLocaleTimeString()}
+          {hasActive && isLivePolling ? ' · refreshes automatically' : ''}
         </Text>
       ) : null}
 
       <Pressable
-        style={[styles.refreshBtn, refreshing && styles.refreshBtnDisabled]}
+        style={({ pressed }) => [styles.googleTextBtn, pressed && styles.pressed]}
         onPress={() => {
           setRefreshing(true);
           void fetchList();
         }}
         disabled={refreshing}>
-        <Text style={styles.refreshBtnText}>Refresh</Text>
+        <Text style={styles.googleTextBtnLabel}>{refreshing ? 'Refreshing…' : 'Refresh now'}</Text>
       </Pressable>
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.surface },
-  content: { padding: 20, paddingBottom: 40 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  loadingText: { fontSize: 15, fontWeight: '400', color: Colors.textMuted },
-  pageTitle: { fontSize: 28, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.6, marginBottom: 6 },
-  pageSub: { fontSize: 15, fontWeight: '400', color: Colors.textMuted, lineHeight: 20, marginBottom: 24 },
-  section: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.textMuted,
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  sectionSpaced: { marginTop: 22 },
-  pressed: { opacity: 0.72 },
-  newRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    backgroundColor: Colors.white,
-    borderRadius: 14,
-    borderWidth: HAIR,
-    borderColor: Colors.borderLight,
-    marginBottom: 24,
-  },
-  newIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  newTextCol: { flex: 1 },
-  newTitle: { fontSize: 17, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.2 },
-  newCaption: { fontSize: 13, fontWeight: '400', color: Colors.textMuted, marginTop: 2 },
-  emptyBox: { alignItems: 'center', paddingVertical: 32, gap: 6 },
-  emptyTitle: { fontSize: 17, fontWeight: '600', color: Colors.textSecondary },
-  emptySub: { fontSize: 14, fontWeight: '400', color: Colors.textMuted },
-  listCard: {
-    backgroundColor: Colors.white,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: HAIR,
-    borderColor: Colors.borderLight,
-  },
-  listCardActive: {
-    borderColor: Colors.border,
-  },
-  listCardTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 },
-  listTitle: { flex: 1, fontSize: 17, fontWeight: '600', color: Colors.textPrimary, letterSpacing: -0.2 },
-  listMeta: { fontSize: 14, fontWeight: '400', color: Colors.textMuted, lineHeight: 19 },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 100,
-    backgroundColor: Colors.surfaceLight,
-  },
-  pillMuted: { backgroundColor: Colors.surface },
-  pillDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.whatsapp },
-  pillDotMuted: { backgroundColor: Colors.textMuted },
-  pillLabel: { fontSize: 12, fontWeight: '600', color: Colors.primary },
-  pillLabelMuted: { color: Colors.textMuted },
-  synced: { fontSize: 12, fontWeight: '400', color: Colors.textMuted, textAlign: 'center', marginTop: 16, marginBottom: 12 },
-  refreshBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    backgroundColor: Colors.surfaceLight,
-    borderWidth: HAIR,
-    borderColor: Colors.borderLight,
-  },
-  refreshBtnDisabled: { opacity: 0.55 },
-  refreshBtnText: { fontSize: 17, fontWeight: '600', color: Colors.primary },
-});

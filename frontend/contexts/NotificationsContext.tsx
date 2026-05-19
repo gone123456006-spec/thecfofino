@@ -1,8 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 
-const STORAGE_KEY = '@finovert_notifications';
+import {
+  loadNotificationsForEmail,
+  migrateLegacyNotificationsIfNeeded,
+  readSignedInEmail,
+  saveNotificationsForEmail,
+  type NotificationItem,
+} from '@/utils/notification-storage';
+
+export type { NotificationItem };
+
 const TOKEN_KEY = '@finovert_token';
 const FALLBACK_API_BASE = 'https://finovert-backend.onrender.com/api';
 
@@ -13,22 +22,11 @@ function getApiBase(): string {
   return FALLBACK_API_BASE;
 }
 
-export type NotificationItem = {
-  id: string;
-  title: string;
-  body: string;
-  time: string;
-  read: boolean;
-};
-
 export type AddNotificationInput = {
   title: string;
   body: string;
-  /** If true, notification is stored as already read (e.g. login/signup system messages). */
   read?: boolean;
-  /** If set, marks an unread notification as read after this delay (message stays; not deleted). */
   autoMarkReadAfterMs?: number;
-  /** Stable id for deduplication (e.g. auto tracking / payment reminders). */
   id?: string;
 };
 
@@ -36,6 +34,7 @@ type NotificationsContextValue = {
   items: NotificationItem[];
   unreadCount: number;
   addNotification: (notification: AddNotificationInput) => void;
+  removeNotificationsByPrefix: (prefix: string) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
   clearNotifications: () => void;
@@ -43,70 +42,58 @@ type NotificationsContextValue = {
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
 
-const DEMO_ITEMS: NotificationItem[] = [];
-
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
-  const [items, setItems] = useState<NotificationItem[]>(DEMO_ITEMS);
+  const [items, setItems] = useState<NotificationItem[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const accountEmailRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as NotificationItem[];
-          if (Array.isArray(parsed) && parsed.length > 0) setItems(parsed);
-        }
-      } catch {
-        // keep demo items
-      }
-    })();
+  const persistForCurrentAccount = useCallback(async (next: NotificationItem[]) => {
+    const email = accountEmailRef.current;
+    setItems(next);
+    await saveNotificationsForEmail(email, next);
   }, []);
 
-  useEffect(() => {
-    // Load token once so we can sync notifications from the backend.
-    void (async () => {
-      try {
-        const t = await AsyncStorage.getItem(TOKEN_KEY);
-        setToken(t);
-      } catch {
-        setToken(null);
+  const switchToAccount = useCallback(
+    async (email: string | null) => {
+      if (email === accountEmailRef.current) return;
+      accountEmailRef.current = email;
+      if (!email) {
+        setItems([]);
+        return;
       }
-    })();
-  }, []);
+      await migrateLegacyNotificationsIfNeeded(email);
+      const stored = await loadNotificationsForEmail(email);
+      setItems(stored);
+    },
+    [],
+  );
+
+  const refreshActiveAccount = useCallback(async () => {
+    const t = await AsyncStorage.getItem(TOKEN_KEY);
+    const email = await readSignedInEmail();
+    if (!t || !email) {
+      await switchToAccount(null);
+      setToken(null);
+      return;
+    }
+    await switchToAccount(email);
+    setToken(t);
+  }, [switchToAccount]);
+
+  useEffect(() => {
+    void refreshActiveAccount();
+  }, [refreshActiveAccount]);
 
   useEffect(() => {
     if (token) return;
-    // If token is written after initial mount (login flow), poll AsyncStorage until it appears.
     const id = setInterval(() => {
-      void (async () => {
-        try {
-          const t = await AsyncStorage.getItem(TOKEN_KEY);
-          if (t) setToken(t);
-        } catch {
-          // ignore
-        }
-      })();
-    }, 3000);
+      void refreshActiveAccount();
+    }, 2000);
     return () => clearInterval(id);
-  }, [token]);
-
-  const persist = useCallback(async (next: NotificationItem[]) => {
-    setItems(next);
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const clearNotifications = useCallback(() => {
-    setItems([]);
-    void AsyncStorage.removeItem(STORAGE_KEY);
-  }, []);
+  }, [token, refreshActiveAccount]);
 
   const syncFromServer = useCallback(
-    async (tkn: string) => {
+    async (tkn: string, email: string) => {
       const res = await fetch(`${getApiBase()}/notifications/my`, {
         method: 'GET',
         headers: {
@@ -118,134 +105,136 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         if (res.status === 401) setToken(null);
         return;
       }
-      const json = (await res.json().catch(() => ({}))) as
-        | { ok?: boolean; notifications?: NotificationItem[] }
-        | { error?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        notifications?: NotificationItem[];
+      };
 
-      const notifications = (json as any)?.notifications;
+      const notifications = json?.notifications;
       if (!Array.isArray(notifications)) return;
 
-      // Normalize payload shape to our NotificationItem type.
       const normalized: NotificationItem[] = notifications
         .filter(Boolean)
-        .map((n: any) => ({
+        .map((n: NotificationItem & { _id?: string; createdAt?: string }) => ({
           id: String(n.id ?? n._id ?? ''),
           title: String(n.title ?? ''),
           body: String(n.body ?? ''),
           time: String(n.time ?? n.createdAt ?? new Date().toISOString()),
           read: Boolean(n.read),
         }))
-        .filter((n: NotificationItem) => Boolean(n.id));
+        .filter((n) => Boolean(n.id));
 
-      // Keep client-only items (e.g. login/signup) so server poll does not wipe them.
-      setItems((prev) => {
-        const serverIds = new Set(normalized.map((n) => n.id));
-        const localOnly = prev.filter((n) => n.id.startsWith('n-') && !serverIds.has(n.id));
-        const merged = [...normalized, ...localOnly].sort((a, b) => {
-          const ta = Date.parse(a.time) || 0;
-          const tb = Date.parse(b.time) || 0;
-          return tb - ta;
-        });
-        void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-        return merged;
+      const prev = await loadNotificationsForEmail(email);
+      const serverIds = new Set(normalized.map((n) => n.id));
+      const localOnly = prev.filter((n) => n.id.startsWith('n-') && !serverIds.has(n.id));
+      const merged = [...normalized, ...localOnly].sort((a, b) => {
+        const ta = Date.parse(a.time) || 0;
+        const tb = Date.parse(b.time) || 0;
+        return tb - ta;
       });
+      await persistForCurrentAccount(merged);
     },
-    [],
+    [persistForCurrentAccount],
   );
 
   useEffect(() => {
-    if (!token) return;
+    const email = accountEmailRef.current;
+    if (!token || !email) return;
 
     let mounted = true;
-    // Initial sync
     void (async () => {
       if (!mounted) return;
       try {
-        await syncFromServer(token);
+        await syncFromServer(token, email);
       } catch {
-        // ignore: keep local fallback
+        /* keep local */
       }
     })();
 
-    // Poll for "real time" updates (new notifications pushed from dashboard).
-    const id = setInterval(() => {
-      void syncFromServer(token).catch(() => {});
+    const pollId = setInterval(() => {
+      const em = accountEmailRef.current;
+      if (token && em) void syncFromServer(token, em).catch(() => {});
     }, 10_000);
-
-    // If user logs out, TOKEN_KEY is removed — stop using stale JWT for polling.
-    const logoutWatch = setInterval(() => {
-      void (async () => {
-        try {
-          const t = await AsyncStorage.getItem(TOKEN_KEY);
-          if (!t) setToken(null);
-        } catch {
-          /* ignore */
-        }
-      })();
-    }, 2000);
 
     return () => {
       mounted = false;
-      clearInterval(id);
-      clearInterval(logoutWatch);
+      clearInterval(pollId);
     };
   }, [token, syncFromServer]);
 
-  const addNotification = useCallback(
-    (notification: AddNotificationInput) => {
-      const id = notification.id ?? `n-${Date.now()}`;
+  const removeNotificationsByPrefix = useCallback(
+    (prefix: string) => {
+      if (!prefix || !accountEmailRef.current) return;
       setItems((prev) => {
-        if (prev.some((n) => n.id === id)) return prev;
-        const newItem: NotificationItem = {
-          title: notification.title,
-          body: notification.body,
-          id,
-          time: new Date().toISOString(),
-          read: Boolean(notification.read),
-        };
-        const next = [newItem, ...prev];
-        void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-
-        if (
-          !newItem.read &&
-          typeof notification.autoMarkReadAfterMs === 'number' &&
-          notification.autoMarkReadAfterMs > 0
-        ) {
-          const delay = notification.autoMarkReadAfterMs;
-          const readId = id;
-          setTimeout(() => {
-            setItems((p) => {
-              const merged = p.map((n) => (n.id === readId ? { ...n, read: true } : n));
-              void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-              return merged;
-            });
-          }, delay);
-        }
-
+        const next = prev.filter((n) => !n.id.startsWith(prefix));
+        if (next.length === prev.length) return prev;
+        void saveNotificationsForEmail(accountEmailRef.current, next);
         return next;
       });
     },
     [],
   );
 
+  const addNotification = useCallback(
+    (notification: AddNotificationInput) => {
+      void (async () => {
+        let email = accountEmailRef.current;
+        if (!email) {
+          email = await readSignedInEmail();
+          if (email) await switchToAccount(email);
+        }
+        if (!email) return;
+
+        const id = notification.id ?? `n-${Date.now()}`;
+        setItems((prev) => {
+          if (prev.some((n) => n.id === id)) return prev;
+          const newItem: NotificationItem = {
+            title: notification.title,
+            body: notification.body,
+            id,
+            time: new Date().toISOString(),
+            read: Boolean(notification.read),
+          };
+          const next = [newItem, ...prev];
+          void saveNotificationsForEmail(email, next);
+
+          if (
+            !newItem.read &&
+            typeof notification.autoMarkReadAfterMs === 'number' &&
+            notification.autoMarkReadAfterMs > 0
+          ) {
+            const delay = notification.autoMarkReadAfterMs;
+            const readId = id;
+            setTimeout(() => {
+              setItems((p) => {
+                const merged = p.map((n) => (n.id === readId ? { ...n, read: true } : n));
+                void saveNotificationsForEmail(accountEmailRef.current, merged);
+                return merged;
+              });
+            }, delay);
+          }
+
+          return next;
+        });
+      })();
+    },
+    [switchToAccount],
+  );
+
   const markAsRead = useCallback(
     (id: string) => {
-      // Optimistic UI update
-      setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+      setItems((prev) => {
+        const next = prev.map((n) => (n.id === id ? { ...n, read: true } : n));
+        void saveNotificationsForEmail(accountEmailRef.current, next);
+        return next;
+      });
 
       void (async () => {
         try {
-          // Client-only IDs (login/signup toasts): never call API or re-sync (would drop local items).
-          if (id.startsWith('n-')) {
-            const raw = await AsyncStorage.getItem(STORAGE_KEY);
-            if (!raw) return;
-            const parsed = JSON.parse(raw) as NotificationItem[];
-            const next = parsed.map((n) => (n.id === id ? { ...n, read: true } : n));
-            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-            return;
-          }
+          if (id.startsWith('n-')) return;
 
-          if (token) {
+          const email = accountEmailRef.current;
+          if (token && email) {
             await fetch(`${getApiBase()}/notifications/my/mark-read`, {
               method: 'PATCH',
               headers: {
@@ -254,18 +243,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
               },
               body: JSON.stringify({ id }),
             }).catch(() => null);
-            await syncFromServer(token).catch(() => null);
-            return;
+            await syncFromServer(token, email).catch(() => null);
           }
-
-          // No token: persist locally only.
-          const raw = await AsyncStorage.getItem(STORAGE_KEY);
-          if (!raw) return;
-          const parsed = JSON.parse(raw) as NotificationItem[];
-          const next = parsed.map((n) => (n.id === id ? { ...n, read: true } : n));
-          await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
         } catch {
-          // ignore
+          /* ignore */
         }
       })();
     },
@@ -273,12 +254,16 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   );
 
   const markAllAsRead = useCallback(() => {
-    // Optimistic UI update
-    setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    setItems((prev) => {
+      const next = prev.map((n) => ({ ...n, read: true }));
+      void saveNotificationsForEmail(accountEmailRef.current, next);
+      return next;
+    });
 
     void (async () => {
       try {
-        if (token) {
+        const email = accountEmailRef.current;
+        if (token && email) {
           await fetch(`${getApiBase()}/notifications/my/mark-read`, {
             method: 'PATCH',
             headers: {
@@ -287,26 +272,25 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             },
             body: JSON.stringify({}),
           }).catch(() => null);
-          await syncFromServer(token).catch(() => null);
-          return;
+          await syncFromServer(token, email).catch(() => null);
         }
-
-        // No token: persist locally only.
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!raw) return;
-        const parsed = JSON.parse(raw) as NotificationItem[];
-        const next = parsed.map((n) => ({ ...n, read: true }));
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       } catch {
-        // ignore
+        /* ignore */
       }
     })();
   }, [syncFromServer, token]);
+
+  const clearNotifications = useCallback(() => {
+    const email = accountEmailRef.current;
+    setItems([]);
+    void saveNotificationsForEmail(email, []);
+  }, []);
 
   const value: NotificationsContextValue = {
     items,
     unreadCount: items.filter((item) => !item.read).length,
     addNotification,
+    removeNotificationsByPrefix,
     markAsRead,
     markAllAsRead,
     clearNotifications,

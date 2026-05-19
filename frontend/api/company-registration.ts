@@ -177,6 +177,11 @@ export async function fetchMyRegistrationsSummary(token: string): Promise<MyRegi
 
 export type PaymentPublicConfig = {
   ok: boolean;
+  companyRegistrationBasePriceINR?: number;
+  companyRegistrationGstPercent?: number;
+  companyRegistrationGstAmountINR?: number;
+  companyRegistrationTotalPayableINR?: number;
+  /** Total payable (same as companyRegistrationTotalPayableINR). */
   companyRegistrationAmountINR: number;
   productTitle: string;
   productDescription: string;
@@ -191,6 +196,10 @@ export async function fetchPaymentPublicConfig(): Promise<PaymentPublicConfig> {
   const base = getApiBase();
   const fallback = (msg: string): PaymentPublicConfig => ({
     ok: false,
+    companyRegistrationBasePriceINR: 1,
+    companyRegistrationGstPercent: 0,
+    companyRegistrationGstAmountINR: 0,
+    companyRegistrationTotalPayableINR: 1,
     companyRegistrationAmountINR: 1,
     productTitle: 'Company Registration',
     productDescription: '',

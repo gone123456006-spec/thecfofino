@@ -4,6 +4,13 @@ const path = require('path');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
+// Windows: ignore Android/Kotlin build caches under node_modules (UNKNOWN scandir crashes).
+const winBuildBlock = /node_modules[\\/].*(?:[\\/]android[\\/]build[\\/]|[\\/]\.cxx[\\/]|[\\/]build[\\/]kotlin[\\/]).*/;
+const defaultBlock = config.resolver.blockList;
+config.resolver.blockList = defaultBlock
+  ? new RegExp(`${defaultBlock.source}|${winBuildBlock.source}`, defaultBlock.flags || 'i')
+  : winBuildBlock;
+
 const defaultResolveRequest = config.resolver.resolveRequest;
 
 /**

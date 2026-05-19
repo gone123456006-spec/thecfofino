@@ -10,6 +10,7 @@ import {
   signOutFirebase,
 } from '@/lib/firebase';
 import { useNotifications } from '@/contexts/NotificationsContext';
+import { clearUserSessionStorage } from '@/utils/clear-user-session';
 
 const AUTH_KEY = '@finovert_auth';
 const TOKEN_KEY = '@finovert_token';
@@ -35,21 +36,50 @@ async function fetchWithTimeout(input: RequestInfo, init: RequestInit & { timeou
 }
 
 type User = {
+  id?: string;
   name: string;
   mobile: string;
   email?: string;
 };
 
+type ApiUserPayload = {
+  id?: string;
+  name?: string;
+  mobile?: string;
+  email?: string;
+};
+
+export type EmailOtpVerifyResult =
+  | { profileComplete: true }
+  | { profileComplete: false; verificationToken: string };
+
+function mapApiUser(apiUser: ApiUserPayload | undefined, fallback: Partial<User>): User {
+  return {
+    id: apiUser?.id != null ? String(apiUser.id) : fallback.id,
+    name: apiUser?.name ?? fallback.name ?? '',
+    mobile: apiUser?.mobile ?? fallback.mobile ?? '',
+    email: apiUser?.email ?? fallback.email,
+  };
+}
+
 type AuthContextValue = {
   user: User | null;
+  /** Bumps on every login/logout so screens refetch user-specific data. */
+  sessionGeneration: number;
   isReady: boolean;
   hasSeenWelcome: boolean;
   setHasSeenWelcome: () => Promise<void>;
   /** Sign in with Google using Firebase. */
   loginWithGoogle: (idToken: string) => Promise<void>;
-  /** Sign in with email and password (requires prior sign-up in the app). */
+  /** Step 1: Send a unique 6-digit OTP to the Gmail inbox (SMTP). */
+  sendEmailOtp: (email: string) => Promise<void>;
+  /** Step 2: Verify OTP — returning users sign in; new users get verificationToken for step 3. */
+  verifyEmailOtpCode: (email: string, code: string) => Promise<EmailOtpVerifyResult>;
+  /** Step 3: Complete sign-in with name + mobile after OTP verified. */
+  completeEmailLogin: (email: string, verificationToken: string, name: string, mobile: string) => Promise<void>;
+  /** Sign in with email and password (legacy). */
   loginWithEmail: (email: string, password: string) => Promise<void>;
-  /** Create account with name, mobile, Gmail, and password; then opens an app session. */
+  /** Create account with name, mobile, Gmail, and password (legacy). */
   signupWithEmail: (name: string, mobile: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   /** Get current session token for API calls. */
@@ -61,10 +91,18 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { addNotification } = useNotifications();
   const [user, setUser] = useState<User | null>(null);
+  const [sessionGeneration, setSessionGeneration] = useState(0);
   const [hasSeenWelcome, setHasSeenWelcomeState] = useState(false);
   const [isReady, setIsReady] = useState(false);
-  const { addNotification } = useNotifications();
+  const clearSessionOnLogout = useCallback(async () => {
+    await clearUserSessionStorage();
+  }, []);
+
+  const bumpSession = useCallback(() => {
+    setSessionGeneration(g => g + 1);
+  }, []);
 
   const loadStoredAuth = useCallback(async () => {
     try {
@@ -98,13 +136,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     fetchWithTimeout(`${getApiBase()}/health`, { timeoutMs: 4000 }).catch(() => {});
   }, []);
 
-  const persistUser = useCallback(async (u: User, token: string) => {
-    setUser(u);
-    await Promise.all([
-      AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u)),
-      AsyncStorage.setItem(TOKEN_KEY, token),
-    ]);
-  }, []);
+  const persistUser = useCallback(
+    async (u: User, token: string) => {
+      setUser(u);
+      await Promise.all([
+        AsyncStorage.setItem(AUTH_KEY, JSON.stringify(u)),
+        AsyncStorage.setItem(TOKEN_KEY, token),
+      ]);
+      bumpSession();
+    },
+    [bumpSession],
+  );
 
   const handleNetworkError = useCallback((err: unknown) => {
     const msg = err instanceof Error ? err.message : 'Network error';
@@ -131,7 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         handleNetworkError(e);
       }
       const text = await (res!).text();
-      let json: { ok?: boolean; error?: string; token?: string; user?: { name?: string; mobile?: string } };
+      let json: { ok?: boolean; error?: string; token?: string; user?: ApiUserPayload };
       try {
         json = text ? JSON.parse(text) : {};
       } catch {
@@ -140,10 +182,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (!res!.ok) throw new Error(json.error || 'Login failed.');
       if (!json.ok || !json.token) throw new Error(json.error || 'Login failed.');
-      const u: User = {
-        name: json.user?.name ?? (name.trim() || 'User'),
-        mobile: json.user?.mobile ?? digits,
-      };
+      const u = mapApiUser(json.user, {
+        name: name.trim() || 'User',
+        mobile: digits,
+      });
       await persistUser(u, json.token);
     },
     [persistUser, handleNetworkError],
@@ -203,10 +245,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const json = await (res!).json().catch(() => ({}));
       if (!res!.ok || !json.ok || !json.token) throw new Error(json.error || 'Invalid OTP.');
 
-      const u: User = {
-        name: json.user?.name ?? (name.trim() || 'User'),
-        mobile: json.user?.mobile ?? digits,
-      };
+      const u = mapApiUser(json.user, {
+        name: name.trim() || 'User',
+        mobile: digits,
+      });
       await persistUser(u, json.token);
     },
     [persistUser, handleNetworkError],
@@ -225,7 +267,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         handleNetworkError(e);
       }
       const text = await (res!).text();
-      let json: { ok?: boolean; error?: string; token?: string; user?: { name?: string; mobile?: string; email?: string } };
+      let json: { ok?: boolean; error?: string; token?: string; user?: ApiUserPayload };
       try {
         json = text ? JSON.parse(text) : {};
       } catch {
@@ -244,11 +286,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(json.error || 'Sign-in failed.');
       }
 
-      const u: User = {
-        name: json.user?.name ?? '',
-        mobile: json.user?.mobile ?? '',
-        email: json.user?.email ?? fallbackEmail ?? '',
-      };
+      const u = mapApiUser(json.user, {
+        email: fallbackEmail ?? '',
+      });
       await persistUser(u, json.token);
     },
     [persistUser, handleNetworkError],
@@ -299,11 +339,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!(res!).ok) throw new Error(json.error || 'Sign-up failed.');
         if (!json.ok || !json.token || !json.user) throw new Error(json.error || 'Sign-up failed.');
 
-        const u: User = {
-          name: json.user?.name ?? trimmedName,
-          mobile: json.user?.mobile ?? digits,
-          email: json.user?.email ?? normEmail,
-        };
+        const u = mapApiUser(json.user, {
+          name: trimmedName,
+          mobile: digits,
+          email: normEmail,
+        });
         await persistUser(u, json.token);
         
         // Action-based notification
@@ -332,6 +372,162 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await exchangeFirebaseTokenForAppSession(firebaseIdToken, fbUser.email ?? undefined);
     },
     [exchangeFirebaseTokenForAppSession],
+  );
+
+  const sendEmailOtp = useCallback(
+    async (email: string) => {
+      const normEmail = email.toLowerCase().trim();
+      const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
+      if (!gmailOk) throw new Error('Use a Gmail address (@gmail.com).');
+
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(`${getApiBase()}/auth/email-otp/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normEmail }),
+          timeoutMs: 30000,
+        });
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') {
+          throw new Error('Request timed out. Please try again.');
+        }
+        handleNetworkError(e);
+      }
+
+      const text = await (res!).text();
+      let json: { ok?: boolean; error?: string } = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        if (res!.status === 404) {
+          throw new Error(
+            'OTP service not found on server. Restart the backend (npm start) or deploy the latest code to Render.',
+          );
+        }
+        throw new Error(res!.status >= 500 ? 'Server error.' : 'Invalid response from server.');
+      }
+      if (!res!.ok || !json.ok) {
+        throw new Error(json.error || `Failed to send OTP (HTTP ${res!.status}).`);
+      }
+    },
+    [handleNetworkError],
+  );
+
+  const verifyEmailOtpCode = useCallback(
+    async (email: string, code: string) => {
+      const normEmail = email.toLowerCase().trim();
+      const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
+      if (!gmailOk) throw new Error('Use a Gmail address (@gmail.com).');
+      const digits = code.replace(/\D/g, '');
+      if (digits.length !== 6) throw new Error('Enter the 6-digit code from your email.');
+
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(`${getApiBase()}/auth/email-otp/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: normEmail, code: digits }),
+          timeoutMs: 30000,
+        });
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') {
+          throw new Error('Verification timed out. Please try again.');
+        }
+        handleNetworkError(e);
+      }
+
+      const json = (await (res!).json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        profileComplete?: boolean;
+        verificationToken?: string;
+        token?: string;
+        user?: ApiUserPayload;
+      };
+      if (!res!.ok || !json.ok) {
+        throw new Error(json.error || 'Invalid OTP for this Gmail.');
+      }
+
+      if (json.profileComplete && json.token) {
+        const u = mapApiUser(json.user, { email: normEmail });
+        await persistUser(u, json.token);
+        addNotification({
+          title: 'Welcome back',
+          body: `Signed in as ${u.name || normEmail}`,
+          read: true,
+        });
+        return { profileComplete: true };
+      }
+
+      if (!json.verificationToken) {
+        throw new Error(json.error || 'Invalid OTP for this Gmail.');
+      }
+      return { profileComplete: false, verificationToken: json.verificationToken };
+    },
+    [handleNetworkError, persistUser, addNotification],
+  );
+
+  const completeEmailLogin = useCallback(
+    async (email: string, verificationToken: string, name: string, mobile: string) => {
+      const normEmail = email.toLowerCase().trim();
+      const gmailOk = /@(gmail|googlemail)\.com$/i.test(normEmail);
+      if (!gmailOk) throw new Error('Use a Gmail address (@gmail.com).');
+      if (!name.trim()) throw new Error('Enter your name.');
+      const digits = mobile.replace(/\D/g, '').slice(-10);
+      if (digits.length !== 10) throw new Error('Enter a valid 10-digit mobile number.');
+      if (!verificationToken) throw new Error('Verify your Gmail OTP first.');
+
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(`${getApiBase()}/auth/email-otp/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: normEmail,
+            verificationToken,
+            name: name.trim(),
+            mobile: digits,
+          }),
+          timeoutMs: 30000,
+        });
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') {
+          throw new Error('Request timed out. Please try again.');
+        }
+        handleNetworkError(e);
+      }
+
+      const text = await (res!).text();
+      let json: {
+        ok?: boolean;
+        error?: string;
+        token?: string;
+        user?: { name?: string; mobile?: string; email?: string };
+      };
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(res!.status >= 500 ? 'Server error.' : 'Invalid response.');
+      }
+      if (!res!.ok || !json.ok || !json.token) {
+        throw new Error(json.error || 'Sign-in failed.');
+      }
+
+      const u = mapApiUser(json.user, {
+        name: name.trim(),
+        mobile: digits,
+        email: normEmail,
+      });
+      await persistUser(u, json.token);
+
+      addNotification({
+        title: 'Login Successful',
+        body: 'Welcome! Your Gmail has been verified.',
+        read: true,
+      });
+    },
+    [persistUser, handleNetworkError, addNotification],
   );
 
   const loginWithEmail = useCallback(
@@ -370,14 +566,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!(res!).ok) throw new Error(json.error || 'Sign-in failed.');
         if (!json.ok || !json.token) throw new Error(json.error || 'Sign-in failed.');
 
-        const u: User = {
-          name: json.user?.name ?? '',
-          mobile: json.user?.mobile ?? '',
-          email: json.user?.email ?? normEmail,
-        };
+        const u = mapApiUser(json.user, { email: normEmail });
         await persistUser(u, json.token);
 
-        // Action-based notification
         addNotification({
           title: 'Login Successful',
           body: 'Welcome back! You have successfully signed in.',
@@ -407,7 +598,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         handleNetworkError(e);
       }
       const text = await (res!).text();
-      let json: { ok?: boolean; error?: string; token?: string; user?: { name?: string; mobile?: string; email?: string } };
+      let json: { ok?: boolean; error?: string; token?: string; user?: ApiUserPayload };
       try {
         json = text ? JSON.parse(text) : {};
       } catch {
@@ -415,22 +606,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (!res!.ok) throw new Error(json.error || 'Sign-in failed.');
       if (!json.ok || !json.token) throw new Error(json.error || 'Sign-in failed.');
-      const u: User = {
-        name: json.user?.name ?? '',
-        mobile: json.user?.mobile ?? '',
-        email: json.user?.email ?? '',
-      };
+      const u = mapApiUser(json.user, {});
       await persistUser(u, json.token);
     },
     [persistUser, handleNetworkError],
   );
 
-
   const logout = useCallback(async () => {
     setUser(null);
-    // Keep notification history in AsyncStorage so the list survives logout / reinstall is not implied — only logout.
-    await Promise.all([AsyncStorage.removeItem(AUTH_KEY), AsyncStorage.removeItem(TOKEN_KEY)]);
-  }, []);
+    await clearSessionOnLogout();
+    await signOutFirebase().catch(() => {});
+    bumpSession();
+  }, [clearSessionOnLogout, bumpSession]);
 
   const getToken = useCallback(async () => {
     return AsyncStorage.getItem(TOKEN_KEY);
@@ -459,10 +646,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!res!.ok) throw new Error(json.error || 'Update failed.');
 
       // Always merge updates into local state so UI gates (needsProfile) clear immediately
-      const updatedUser: User = {
+      const updatedUser = mapApiUser(json.ok ? (json.user as ApiUserPayload) : undefined, {
         ...user!,
-        ...(json.ok && json.user ? json.user : updates),
-      };
+        ...updates,
+      });
       setUser(updatedUser);
       await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(updatedUser));
     },
@@ -471,10 +658,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value: AuthContextValue = {
     user,
+    sessionGeneration,
     isReady,
     hasSeenWelcome,
     setHasSeenWelcome,
     loginWithGoogle,
+    sendEmailOtp,
+    verifyEmailOtpCode,
+    completeEmailLogin,
     loginWithEmail,
     signupWithEmail,
     logout,
