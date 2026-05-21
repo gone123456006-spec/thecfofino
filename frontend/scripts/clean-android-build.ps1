@@ -8,6 +8,7 @@ $targets = @(
     Join-Path $frontend "android\build"
     Join-Path $frontend "android\app\build"
     Join-Path $frontend "android\.gradle"
+    Join-Path $frontend "android\build\expo-updates"
     Join-Path $frontend "node_modules\expo-updates\android\build"
 )
 
@@ -28,4 +29,4 @@ foreach ($path in ($targets | Select-Object -Unique)) {
     }
 }
 
-Write-Host "Done. Run: cd android; .\gradlew.bat clean bundleRelease"
+Write-Host "Done. Run: npm run build:android:aab"

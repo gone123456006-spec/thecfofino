@@ -12,7 +12,7 @@
     "build:ios:simulator": "npx eas-cli build --platform ios --profile simulator",
     "build:ios:production": "npx eas-cli build --platform ios --profile production",
     "clean:android": "powershell -ExecutionPolicy Bypass -File ./scripts/clean-android-build.ps1",
-    "build:android:aab": "npm run clean:android && cd android && gradlew.bat --stop && gradlew.bat bundleRelease"
+    "build:android:aab": "powershell -ExecutionPolicy Bypass -File ./scripts/build-aab.ps1"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
