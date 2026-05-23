@@ -150,11 +150,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const handleNetworkError = useCallback((err: unknown) => {
     const msg = err instanceof Error ? err.message : 'Network error';
-    throw new Error(
-      msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')
-        ? 'Cannot reach server. Set EXPO_PUBLIC_API_URL to your computer IP when using a physical device.'
-        : msg,
-    );
+    const lower = msg.toLowerCase();
+    const api = getApiBase();
+    if (
+      lower.includes('fetch') ||
+      lower.includes('network') ||
+      lower.includes('failed') ||
+      lower.includes('aborted')
+    ) {
+      throw new Error(
+        `Cannot reach server at ${api}. ` +
+          (api.startsWith('http://')
+            ? 'On a phone: use the same Wi‑Fi as your PC, run ipconfig for your IPv4, set EXPO_PUBLIC_API_URL=http://YOUR_IP:4000/api in frontend/.env, restart Expo. Or use https://thecfofino-3.onrender.com/api for production.'
+            : 'Check internet connection and that the backend is deployed on Render with SMTP configured.'),
+      );
+    }
+    throw new Error(msg);
   }, []);
 
   /** Login or sign up with name + mobile. Calls POST /api/otp/login. */
@@ -386,11 +397,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: normEmail }),
-          timeoutMs: 30000,
+          timeoutMs: 90000,
         });
       } catch (e) {
         if ((e as { name?: string })?.name === 'AbortError') {
-          throw new Error('Request timed out. Please try again.');
+          const api = getApiBase();
+          throw new Error(
+            api.includes('onrender.com')
+              ? 'Server timed out. Render Gmail SMTP is slow — use local API (frontend/.env) or add RESEND_API_KEY on Render.'
+              : 'Request timed out. Check backend is running (npm run dev) and EXPO_PUBLIC_API_URL matches ipconfig IPv4.',
+          );
         }
         handleNetworkError(e);
       }

@@ -29,6 +29,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.brandovert.finovert",
+      "usesCleartextTraffic": true,
       "versionCode": 4,
       "permissions": [
         "CAMERA"

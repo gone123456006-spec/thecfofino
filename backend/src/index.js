@@ -130,14 +130,23 @@ mongoose
             }
         }
         await User.syncIndexes();
-        httpServer = app.listen(config.port, () => {
+        httpServer = app.listen(config.port, '0.0.0.0', () => {
             console.log(`🚀 Finovert API running at http://localhost:${config.port}`);
             console.log(`📊 Admin Dashboard:   http://localhost:${config.port}/dashboard`);
-            const smtp = config.smtp || {};
-            if (smtp.user && smtp.pass) {
-                console.log(`📧 Gmail SMTP:        ${smtp.user} (OTP + registration tracking emails)`);
+            const { isResendConfigured, verifySmtpConnection } = require('./services/mailer');
+            if (isResendConfigured()) {
+                console.log('📧 Email: Resend API (OTP + notifications)');
             } else {
-                console.warn('⚠️  Gmail SMTP not set — add SMTP_USER and SMTP_PASS to .env');
+                const smtp = config.smtp || {};
+                if (smtp.user && smtp.pass) {
+                    console.log(`📧 Gmail SMTP:        ${smtp.user} (OTP + registration emails)`);
+                    verifySmtpConnection().then((r) => {
+                        if (r.ok) console.log('✅ Email transport verified');
+                        else console.warn('⚠️  Email verify failed:', r.error);
+                    });
+                } else {
+                    console.warn('⚠️  Email not set — add SMTP_* or RESEND_API_KEY to .env');
+                }
             }
         });
         httpServer.on('error', (err) => {

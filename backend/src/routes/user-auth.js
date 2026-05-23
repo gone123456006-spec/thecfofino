@@ -361,13 +361,14 @@ router.post('/email-otp/send', async (req, res) => {
             });
         }
 
-        if (!isSmtpConfigured()) {
+        const { isResendConfigured } = require('../services/mailer');
+        if (!isSmtpConfigured() && !isResendConfigured()) {
             const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
             if (!demoEnabled) {
                 return res.status(500).json({
                     ok: false,
                     error:
-                        'Email OTP is not configured. Set SMTP_USER and SMTP_PASS (Gmail App Password) in backend .env.',
+                        'Email OTP is not configured. Set SMTP_USER/SMTP_PASS or RESEND_API_KEY on the server.',
                 });
             }
         }
@@ -376,7 +377,7 @@ router.post('/email-otp/send', async (req, res) => {
         const code = demoEnabled ? String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH) : generateOtpCode();
         storeEmailOtp(normEmail, code);
 
-        if (demoEnabled && !isSmtpConfigured()) {
+        if (demoEnabled && !isSmtpConfigured() && !isResendConfigured()) {
             console.log(`[email-otp/send] DEMO ONLY (no SMTP): OTP ${code} for ${normEmail}`);
             return res.status(200).json({
                 ok: true,
@@ -392,10 +393,10 @@ router.post('/email-otp/send', async (req, res) => {
             message: `A ${OTP_LENGTH}-digit code was sent to your Gmail.`,
         });
     } catch (err) {
-        console.error('[email-otp/send] error:', err);
+        console.error('[email-otp/send] error:', err.cause || err);
         return res.status(500).json({
             ok: false,
-            error: 'Failed to send OTP. Check SMTP settings and try again.',
+            error: err.message || 'Failed to send OTP. Check SMTP settings and try again.',
         });
     }
 });

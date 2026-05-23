@@ -1,5 +1,11 @@
 require('dotenv').config();
 
+function envStr(key, fallback = '') {
+    const raw = process.env[key];
+    if (raw == null || raw === '') return fallback;
+    return String(raw).trim().replace(/^['"]|['"]$/g, '');
+}
+
 const config = {
     mongoUri: process.env.MONGODB_URI,
     port: parseInt(process.env.PORT || '4000', 10),
@@ -24,12 +30,18 @@ const config = {
     },
 
     smtp: {
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASS || '',
-        from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
+        host: envStr('SMTP_HOST', 'smtp.gmail.com'),
+        port: parseInt(envStr('SMTP_PORT', '587'), 10),
+        secure: envStr('SMTP_SECURE', 'false') === 'true',
+        user: envStr('SMTP_USER'),
+        pass: envStr('SMTP_PASS').replace(/\s+/g, ''),
+        from: envStr('SMTP_FROM') || envStr('SMTP_USER'),
+    },
+
+    /** Optional — reliable on Render (https://resend.com). Prefer over Gmail SMTP in production. */
+    resend: {
+        apiKey: envStr('RESEND_API_KEY'),
+        from: envStr('RESEND_FROM', 'Finovert <onboarding@resend.dev>'),
     },
 
     emailOtp: {
