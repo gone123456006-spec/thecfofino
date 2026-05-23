@@ -15,6 +15,9 @@ try {
     Start-Sleep -Seconds 2
 
     $env:NODE_ENV = "production"
+    $env:EXPO_USE_LOCAL_API = "0"
+    $env:EXPO_PUBLIC_API_URL = "https://thecfofino-3.onrender.com/api"
+    Write-Host "API baked into AAB: $env:EXPO_PUBLIC_API_URL" -ForegroundColor Green
     Write-Host "Building release AAB (15-25 min first time)..."
     .\gradlew.bat bundleRelease --no-daemon
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

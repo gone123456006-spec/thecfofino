@@ -12,14 +12,23 @@ try {
 
 const appJson = require('./app.json');
 
+/** Play Store / release APK must use this (not a PC LAN IP). */
+const PRODUCTION_API = 'https://thecfofino-3.onrender.com/api';
+
+/** Local dev only: EXPO_USE_LOCAL_API=1 + EXPO_PUBLIC_API_URL=http://192.168.x.x:4000/api */
+const useLocalApi = process.env.EXPO_USE_LOCAL_API === '1';
+const apiBaseUrl =
+  useLocalApi && process.env.EXPO_PUBLIC_API_URL?.trim()
+    ? process.env.EXPO_PUBLIC_API_URL.trim()
+    : PRODUCTION_API;
+
 module.exports = {
   expo: {
     ...appJson.expo,
     extra: {
       ...appJson.expo.extra,
-      /** Public HTTPS URL for Play Console privacy policy field (optional). */
       privacyPolicyUrl: process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL,
-      apiBaseUrl: process.env.EXPO_PUBLIC_API_URL,
+      apiBaseUrl,
       firebase: {
         apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
         authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,

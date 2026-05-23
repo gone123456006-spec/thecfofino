@@ -49,6 +49,14 @@ app.get('/health', (_req, res) => {
     res.status(200).type('text/plain').send('OK');
 });
 
+app.get('/api', (_req, res) => {
+    res.json({
+        ok: true,
+        message: 'Finovert API is running. Use /api/health or /api/auth/* endpoints.',
+        health: '/api/health',
+    });
+});
+
 app.get('/api/health', (_req, res) => {
     res.json({
         ok: true,

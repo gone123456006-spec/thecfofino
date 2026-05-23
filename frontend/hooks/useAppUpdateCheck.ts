@@ -2,14 +2,8 @@ import Constants from 'expo-constants';
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 
+import { getApiBase } from '@/constants/api';
 import { isVersionOlder } from '@/utils/compare-version';
-
-function getApiBase(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-  const fromExtra = (Constants.expoConfig?.extra as { apiBaseUrl?: string } | undefined)?.apiBaseUrl;
-  if (fromExtra) return fromExtra;
-  return 'https://finovert-backend.onrender.com/api';
-}
 
 export type AppUpdateInfo = {
   updateAvailable: boolean;

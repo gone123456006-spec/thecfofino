@@ -1,5 +1,9 @@
 import { Platform } from 'react-native';
 
+import { getApiBase } from '@/constants/api';
+
+export { getApiBase };
+
 export type CompanyDirectorPayload = {
   name: string;
   pan: string;
@@ -23,21 +27,6 @@ export type CompanyRegistrationPayload = {
   companyEmail: string;
   directors: CompanyDirectorPayload[];
 };
-
-/**
- * API base must end with `/api` (Express mounts routes under `/api/*`).
- * If EXPO_PUBLIC_API_URL is set without `/api`, we append it — otherwise verify/payments return HTML 404 and JSON.parse throws.
- */
-export function getApiBase(): string {
-  const fallback = 'https://finovert-backend.onrender.com/api';
-  const raw = process.env.EXPO_PUBLIC_API_URL?.trim();
-  if (!raw) return fallback;
-  let base = raw.replace(/\/+$/, '');
-  if (!/\/api$/i.test(base)) {
-    base = `${base}/api`;
-  }
-  return base;
-}
 
 /** Parse JSON from fetch; if server returns HTML (wrong URL / 502 page), throw a clear message. */
 export async function parseApiJson<T>(res: Response, context: string): Promise<T> {

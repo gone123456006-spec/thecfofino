@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import Constants from 'expo-constants';
 
+import { getApiBase } from '@/constants/api';
 import {
   loadNotificationsForEmail,
   migrateLegacyNotificationsIfNeeded,
@@ -13,14 +13,6 @@ import {
 export type { NotificationItem };
 
 const TOKEN_KEY = '@finovert_token';
-const FALLBACK_API_BASE = 'https://finovert-backend.onrender.com/api';
-
-function getApiBase(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-  const fromExtra = (Constants.expoConfig?.extra as { apiBaseUrl?: string } | undefined)?.apiBaseUrl;
-  if (fromExtra) return fromExtra;
-  return FALLBACK_API_BASE;
-}
 
 export type AddNotificationInput = {
   title: string;

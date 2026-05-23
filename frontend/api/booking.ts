@@ -6,17 +6,14 @@
 
 import { Platform } from 'react-native';
 
+import { getApiBase } from '@/constants/api';
+
 export type BookingPayload = {
   name: string;
   mobile: string;
   purpose: string;
   details: string;
 };
-
-function getApiBase(): string {
-  if (process.env.EXPO_PUBLIC_API_URL?.trim()) return process.env.EXPO_PUBLIC_API_URL.trim();
-  return 'https://finovert-backend.onrender.com/api';
-}
 
 const getBookingApiUrl = (): string => {
   const override = process.env.EXPO_PUBLIC_BOOKING_API_URL?.trim();

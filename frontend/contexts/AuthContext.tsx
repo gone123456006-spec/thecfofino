@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
 
 import {
   getIdToken,
@@ -11,18 +10,11 @@ import {
 } from '@/lib/firebase';
 import { useNotifications } from '@/contexts/NotificationsContext';
 import { clearUserSessionStorage } from '@/utils/clear-user-session';
+import { getApiBase } from '@/constants/api';
 
 const AUTH_KEY = '@finovert_auth';
 const TOKEN_KEY = '@finovert_token';
 const WELCOME_KEY = '@finovert_welcome_seen';
-
-/** Backend API base. Set EXPO_PUBLIC_API_URL in .env for physical device (e.g. http://192.168.1.5:4000/api). */
-function getApiBase(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
-  const fromExtra = (Constants.expoConfig?.extra as { apiBaseUrl?: string } | undefined)?.apiBaseUrl;
-  if (fromExtra) return fromExtra;
-  return 'https://finovert-backend.onrender.com/api';
-}
 
 async function fetchWithTimeout(input: RequestInfo, init: RequestInit & { timeoutMs?: number } = {}) {
   const { timeoutMs = 25000, ...rest } = init;
