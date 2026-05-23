@@ -51,9 +51,9 @@ const config = {
 
     /** Play Store update check — set when you publish a new release (no app rebuild needed). */
     appVersion: {
-        latest: process.env.APP_LATEST_VERSION || '1.0.3',
+        latest: process.env.APP_LATEST_VERSION || '1.0.4',
         min: process.env.APP_MIN_VERSION || '1.0.0',
-        androidLatestVersionCode: parseInt(process.env.APP_LATEST_ANDROID_VERSION_CODE || '4', 10),
+        androidLatestVersionCode: parseInt(process.env.APP_LATEST_ANDROID_VERSION_CODE || '5', 10),
     },
 };
 
