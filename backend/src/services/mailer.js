@@ -20,13 +20,14 @@ function isSmtpConfigured() {
 
 function createSmtpTransport() {
     const smtp = config.smtp;
-    const smtpPort = Number(smtp.port);
-    const smtpSecure = smtpPort === 465 ? true : Boolean(smtp.secure);
+    const port = Number(smtp.port);
+    const secure = port === 465 ? true : smtp.secure === true;
+
     return nodemailer.createTransport({
         host: smtp.host,
-        port: smtpPort,
-        secure: smtpSecure,
-        requireTLS: smtpPort === 587 && !smtpSecure,
+        port,
+        secure,
+        requireTLS: port === 587 && !secure,
         connectionTimeout: 15_000,
         greetingTimeout: 15_000,
         socketTimeout: 20_000,
@@ -60,26 +61,31 @@ function withTimeout(promise, ms, label) {
 function smtpErrorMessage(err) {
     const code = err && err.code;
     const msg = (err && err.message) || '';
+    const host = config.smtp?.host || '';
+
     if (code === 'EAUTH' || /invalid login|authentication failed/i.test(msg)) {
-        return 'SMTP auth failed: Gmail rejected the credentials. Use a valid 16-character Google App Password in SMTP_PASS.';
+        return (
+            'SMTP login failed. Check SMTP_USER and SMTP_PASS in server settings ' +
+            '(Brevo: use smtp-brevo login + SMTP key; Gmail: use App Password).'
+        );
     }
     if (/timed out/i.test(msg) || code === 'ETIMEDOUT' || code === 'ESOCKET') {
         if (isRenderEnvironment()) {
             return (
-                'SMTP connection timed out on Render. Reason: Render can block/throttle outbound SMTP ports ' +
-                '(25/465/587), especially on restricted plans, to prevent spam abuse. ' +
-                'Check your Render plan/network policy, keep SMTP_HOST=smtp.gmail.com, SMTP_PORT=465, SMTP_SECURE=true, then redeploy.'
+                'SMTP timed out on Render. Reason: some Render plans block outbound SMTP ports ' +
+                '(25/465/587) to stop spam. Fix: use a paid Render instance, or use Brevo on port 587 ' +
+                '(smtp-relay.brevo.com) with SMTP_SECURE=false, then redeploy.'
             );
         }
-        return 'SMTP connection timed out. Check SMTP_HOST/PORT/SECURE and your network/firewall, then try again.';
+        return 'SMTP timed out. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, and try again.';
     }
     if (code === 'ECONNREFUSED' || code === 'ENETUNREACH' || code === 'EHOSTUNREACH') {
-        return 'SMTP network error from server side. Check SMTP_HOST/PORT and whether outbound SMTP is allowed by your hosting provider.';
+        return `Cannot reach mail server (${host}). Check SMTP_HOST and SMTP_PORT.`;
     }
-    if (code === 'ECONNECTION' || /invalid/i.test(msg) || /certificate/i.test(msg)) {
-        return 'SMTP configuration error. Verify SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, and SMTP_PASS.';
+    if (/certificate/i.test(msg)) {
+        return 'SMTP TLS error. For port 587 use SMTP_SECURE=false; for port 465 use SMTP_SECURE=true.';
     }
-    return msg || 'Failed to send email via Gmail SMTP.';
+    return msg || 'Failed to send email via SMTP.';
 }
 
 /**
@@ -87,7 +93,7 @@ function smtpErrorMessage(err) {
  */
 async function sendMail(opts) {
     if (!isSmtpConfigured()) {
-        throw new Error('Gmail SMTP is not configured (set SMTP_USER and SMTP_PASS in .env).');
+        throw new Error('SMTP is not configured (set SMTP_USER and SMTP_PASS in .env).');
     }
     const smtp = config.smtp;
     const from = smtp.from || smtp.user;
@@ -101,7 +107,7 @@ async function sendMail(opts) {
                 html: opts.html || opts.text || '',
             }),
             SEND_TIMEOUT_MS,
-            'Gmail SMTP',
+            'SMTP',
         );
     } catch (err) {
         resetTransporter();
@@ -117,12 +123,12 @@ async function verifySmtpConnection() {
     }
     const transport = createSmtpTransport();
     try {
-        await withTimeout(transport.verify(), 15_000, 'Gmail SMTP verify');
+        await withTimeout(transport.verify(), 15_000, 'SMTP verify');
         transporter = transport;
-        return { ok: true, mode: 'gmail-smtp' };
+        return { ok: true, mode: 'smtp', host: config.smtp.host };
     } catch (err) {
         resetTransporter();
-        return { ok: false, error: err.message || String(err) };
+        return { ok: false, error: smtpErrorMessage(err) };
     }
 }
 
