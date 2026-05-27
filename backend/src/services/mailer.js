@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const config = require('../config');
+const brevo = require('./brevo');
 
 const SEND_TIMEOUT_MS = 25_000;
 
@@ -16,6 +17,11 @@ function isRenderEnvironment() {
 function isSmtpConfigured() {
     const smtp = config.smtp || {};
     return Boolean(smtp.user && smtp.pass);
+}
+
+/** Brevo API or SMTP — either can send OTP / registration emails. */
+function isEmailConfigured() {
+    return brevo.isConfigured() || isSmtpConfigured();
 }
 
 function createSmtpTransport() {
@@ -92,8 +98,13 @@ function smtpErrorMessage(err) {
  * @param {{ to: string, subject: string, text?: string, html?: string }} opts
  */
 async function sendMail(opts) {
+    if (brevo.isConfigured()) {
+        return brevo.sendTransactionalEmail(opts);
+    }
     if (!isSmtpConfigured()) {
-        throw new Error('SMTP is not configured (set SMTP_USER and SMTP_PASS in .env).');
+        throw new Error(
+            'Email is not configured. Set BREVO_API_KEY (recommended on Render) or SMTP_USER and SMTP_PASS.',
+        );
     }
     const smtp = config.smtp;
     const from = smtp.from || smtp.user;
@@ -134,6 +145,7 @@ async function verifySmtpConnection() {
 
 module.exports = {
     isSmtpConfigured,
+    isEmailConfigured,
     getTransporter,
     resetTransporter,
     verifySmtpConnection,

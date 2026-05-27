@@ -1,6 +1,6 @@
 const CompanyRegistration = require('../models/CompanyRegistration');
 const User = require('../models/User');
-const { sendMail, isSmtpConfigured } = require('./mailer');
+const { sendMail, isEmailConfigured } = require('./mailer');
 const {
     TRACKER_STEPS,
     effectiveRegistrationStatus,
@@ -257,8 +257,8 @@ async function loadRegForEmail(registrationOrId) {
  * Send payment, tracker-step, and pending reminder emails.
  */
 async function processRegistrationEmails(registrationOrId) {
-    if (!isSmtpConfigured()) {
-        console.warn('[registration-email] SMTP not configured — skip');
+    if (!isEmailConfigured()) {
+        console.warn('[registration-email] Email not configured — skip');
         return;
     }
 

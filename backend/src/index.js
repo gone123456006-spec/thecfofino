@@ -141,16 +141,21 @@ mongoose
         httpServer = app.listen(config.port, '0.0.0.0', () => {
             console.log(`🚀 Finovert API running at http://localhost:${config.port}`);
             console.log(`📊 Admin Dashboard:   http://localhost:${config.port}/dashboard`);
-            const { verifySmtpConnection } = require('./services/mailer');
+            const { verifySmtpConnection, isEmailConfigured } = require('./services/mailer');
+            const brevoCfg = config.brevo || {};
             const smtp = config.smtp || {};
-            if (smtp.user && smtp.pass) {
-                console.log(`📧 Gmail SMTP:        ${smtp.user} (OTP + registration emails)`);
+            if (brevoCfg.apiKey) {
+                console.log(
+                    `📧 Brevo API:         ${brevoCfg.senderEmail || '(set BREVO_SENDER_EMAIL)'} (OTP + registration emails)`,
+                );
+            } else if (smtp.user && smtp.pass) {
+                console.log(`📧 SMTP:              ${smtp.user} (OTP + registration emails)`);
                 verifySmtpConnection().then((r) => {
-                    if (r.ok) console.log('✅ Gmail SMTP connection verified');
-                    else console.warn('⚠️  Gmail SMTP verify failed:', r.error);
+                    if (r.ok) console.log('✅ SMTP connection verified');
+                    else console.warn('⚠️  SMTP verify failed:', r.error);
                 });
-            } else {
-                console.warn('⚠️  Gmail SMTP not set — add SMTP_USER and SMTP_PASS to .env');
+            } else if (!isEmailConfigured()) {
+                console.warn('⚠️  Email not set — add BREVO_API_KEY or SMTP_USER and SMTP_PASS to .env');
             }
         });
         httpServer.on('error', (err) => {

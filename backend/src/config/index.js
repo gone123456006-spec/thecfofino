@@ -38,6 +38,13 @@ const config = {
         from: envStr('SMTP_FROM') || envStr('SMTP_USER'),
     },
 
+    /** Brevo transactional API (HTTPS) — preferred on Render when SMTP ports are blocked. */
+    brevo: {
+        apiKey: envStr('BREVO_API_KEY'),
+        senderEmail: envStr('BREVO_SENDER_EMAIL') || envStr('SMTP_FROM') || envStr('SMTP_USER'),
+        senderName: envStr('BREVO_SENDER_NAME', 'Finovert'),
+    },
+
     emailOtp: {
         demoEnabled: process.env.DEMO_OTP_ENABLED === '1',
         demoCode: process.env.DEMO_OTP_CODE || '123456',

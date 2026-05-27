@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const config = require('../config');
-const { sendMail, isSmtpConfigured } = require('./mailer');
+const { sendMail, isEmailConfigured } = require('./mailer');
 
 const OTP_LENGTH = 6;
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -125,7 +125,7 @@ async function sendOtpEmail(toEmail, code) {
 module.exports = {
     OTP_LENGTH,
     RESEND_COOLDOWN_MS,
-    isSmtpConfigured,
+    isEmailConfigured,
     generateOtpCode,
     storeEmailOtp,
     canResend,

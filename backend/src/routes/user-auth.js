@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 const User = require('../models/User');
 const {
-    isSmtpConfigured,
+    isEmailConfigured,
     generateOtpCode,
     storeEmailOtp,
     canResend,
@@ -361,13 +361,13 @@ router.post('/email-otp/send', async (req, res) => {
             });
         }
 
-        if (!isSmtpConfigured()) {
+        if (!isEmailConfigured()) {
             const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
             if (!demoEnabled) {
                 return res.status(500).json({
                     ok: false,
                     error:
-                        'Email OTP is not configured. Set SMTP_USER and SMTP_PASS (Gmail App Password) on the server.',
+                        'Email OTP is not configured. Set BREVO_API_KEY or SMTP_USER and SMTP_PASS on the server.',
                 });
             }
         }
@@ -376,7 +376,7 @@ router.post('/email-otp/send', async (req, res) => {
         const code = demoEnabled ? String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH) : generateOtpCode();
         storeEmailOtp(normEmail, code);
 
-        if (demoEnabled && !isSmtpConfigured()) {
+        if (demoEnabled && !isEmailConfigured()) {
             console.log(`[email-otp/send] DEMO ONLY (no SMTP): OTP ${code} for ${normEmail}`);
             return res.status(200).json({
                 ok: true,
@@ -423,7 +423,7 @@ router.post('/email-otp/verify', async (req, res) => {
         const normEmail = normalizeEmail(email);
         const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
 
-        if (demoEnabled && !isSmtpConfigured()) {
+        if (demoEnabled && !isEmailConfigured()) {
             const demoCode = String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH);
             const entered = String(code).replace(/\D/g, '');
             if (entered !== demoCode) {
