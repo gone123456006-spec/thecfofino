@@ -5,6 +5,14 @@ const SEND_TIMEOUT_MS = 25_000;
 
 let transporter = null;
 
+function isRenderEnvironment() {
+    return Boolean(
+        process.env.RENDER ||
+        process.env.RENDER_EXTERNAL_URL ||
+        process.env.RENDER_SERVICE_ID,
+    );
+}
+
 function isSmtpConfigured() {
     const smtp = config.smtp || {};
     return Boolean(smtp.user && smtp.pass);
@@ -12,11 +20,13 @@ function isSmtpConfigured() {
 
 function createSmtpTransport() {
     const smtp = config.smtp;
+    const smtpPort = Number(smtp.port);
+    const smtpSecure = smtpPort === 465 ? true : Boolean(smtp.secure);
     return nodemailer.createTransport({
         host: smtp.host,
-        port: Number(smtp.port),
-        secure: smtp.secure,
-        requireTLS: Number(smtp.port) === 587 && !smtp.secure,
+        port: smtpPort,
+        secure: smtpSecure,
+        requireTLS: smtpPort === 587 && !smtpSecure,
         connectionTimeout: 15_000,
         greetingTimeout: 15_000,
         socketTimeout: 20_000,
@@ -51,10 +61,23 @@ function smtpErrorMessage(err) {
     const code = err && err.code;
     const msg = (err && err.message) || '';
     if (code === 'EAUTH' || /invalid login|authentication failed/i.test(msg)) {
-        return 'Gmail rejected the app password. Use a 16-character Google App Password in SMTP_PASS.';
+        return 'SMTP auth failed: Gmail rejected the credentials. Use a valid 16-character Google App Password in SMTP_PASS.';
     }
     if (/timed out/i.test(msg) || code === 'ETIMEDOUT' || code === 'ESOCKET') {
-        return 'Gmail SMTP timed out. Check SMTP_HOST/PORT on Render (try port 465 with SMTP_SECURE=true) and redeploy.';
+        if (isRenderEnvironment()) {
+            return (
+                'SMTP connection timed out on Render. Reason: Render can block/throttle outbound SMTP ports ' +
+                '(25/465/587), especially on restricted plans, to prevent spam abuse. ' +
+                'Check your Render plan/network policy, keep SMTP_HOST=smtp.gmail.com, SMTP_PORT=465, SMTP_SECURE=true, then redeploy.'
+            );
+        }
+        return 'SMTP connection timed out. Check SMTP_HOST/PORT/SECURE and your network/firewall, then try again.';
+    }
+    if (code === 'ECONNREFUSED' || code === 'ENETUNREACH' || code === 'EHOSTUNREACH') {
+        return 'SMTP network error from server side. Check SMTP_HOST/PORT and whether outbound SMTP is allowed by your hosting provider.';
+    }
+    if (code === 'ECONNECTION' || /invalid/i.test(msg) || /certificate/i.test(msg)) {
+        return 'SMTP configuration error. Verify SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, and SMTP_PASS.';
     }
     return msg || 'Failed to send email via Gmail SMTP.';
 }
