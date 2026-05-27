@@ -38,12 +38,6 @@ const config = {
         from: envStr('SMTP_FROM') || envStr('SMTP_USER'),
     },
 
-    /** Optional — reliable on Render (https://resend.com). Prefer over Gmail SMTP in production. */
-    resend: {
-        apiKey: envStr('RESEND_API_KEY'),
-        from: envStr('RESEND_FROM', 'Finovert <onboarding@resend.dev>'),
-    },
-
     emailOtp: {
         demoEnabled: process.env.DEMO_OTP_ENABLED === '1',
         demoCode: process.env.DEMO_OTP_CODE || '123456',
@@ -51,9 +45,9 @@ const config = {
 
     /** Play Store update check — set when you publish a new release (no app rebuild needed). */
     appVersion: {
-        latest: process.env.APP_LATEST_VERSION || '1.0.4',
+        latest: process.env.APP_LATEST_VERSION || '1.0.5',
         min: process.env.APP_MIN_VERSION || '1.0.0',
-        androidLatestVersionCode: parseInt(process.env.APP_LATEST_ANDROID_VERSION_CODE || '5', 10),
+        androidLatestVersionCode: parseInt(process.env.APP_LATEST_ANDROID_VERSION_CODE || '6', 10),
     },
 };
 

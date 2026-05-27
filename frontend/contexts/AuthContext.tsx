@@ -396,7 +396,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const api = getApiBase();
           throw new Error(
             api.includes('onrender.com')
-              ? 'Server timed out. Render Gmail SMTP is slow — use local API (frontend/.env) or add RESEND_API_KEY on Render.'
+              ? 'Server timed out. Check Gmail SMTP on Render (SMTP_USER/SMTP_PASS) or try SMTP_PORT=465 and SMTP_SECURE=true, then redeploy.'
               : 'Request timed out. Check backend is running (npm run dev) and EXPO_PUBLIC_API_URL matches ipconfig IPv4.',
           );
         }
