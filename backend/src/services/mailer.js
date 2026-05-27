@@ -14,15 +14,15 @@ function createSmtpTransport() {
     const smtp = config.smtp;
     return nodemailer.createTransport({
         host: smtp.host,
-        port: smtp.port,
+        port: Number(smtp.port),
         secure: smtp.secure,
-        requireTLS: smtp.port === 587 && !smtp.secure,
+        requireTLS: Number(smtp.port) === 587 && !smtp.secure,
         connectionTimeout: 15_000,
         greetingTimeout: 15_000,
         socketTimeout: 20_000,
         auth: {
             user: smtp.user,
-            pass: smtp.pass,
+            pass: String(smtp.pass || '').replace(/\s+/g, ''),
         },
     });
 }
