@@ -5,7 +5,7 @@ const config = require('../config');
 const User = require('../models/User');
 const {
     isEmailConfigured,
-    generateOtpCode,
+    createOtpForEmail,
     storeEmailOtp,
     canResend,
     verifyOtpForEmail,
@@ -373,10 +373,17 @@ router.post('/email-otp/send', async (req, res) => {
         }
 
         const demoEnabled = config.emailOtp && config.emailOtp.demoEnabled;
-        const code = demoEnabled ? String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH) : generateOtpCode();
-        storeEmailOtp(normEmail, code);
+        const useDemoFixedCode = demoEnabled && !isEmailConfigured();
 
-        if (demoEnabled && !isEmailConfigured()) {
+        let code;
+        if (useDemoFixedCode) {
+            code = String(config.emailOtp.demoCode || '123456').padStart(OTP_LENGTH, '0').slice(-OTP_LENGTH);
+            storeEmailOtp(normEmail, code);
+        } else {
+            code = createOtpForEmail(normEmail);
+        }
+
+        if (useDemoFixedCode) {
             console.log(`[email-otp/send] DEMO ONLY (no SMTP): OTP ${code} for ${normEmail}`);
             return res.status(200).json({
                 ok: true,
