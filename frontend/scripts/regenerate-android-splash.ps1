@@ -1,4 +1,5 @@
-# Regenerate Android native splash (white bg + transparent logo). Run from frontend/.
+# Regenerate Android splash icon; optional native prebuild.
+# Run from frontend/: npm run prebuild:android
 $ErrorActionPreference = "Stop"
 $frontend = Split-Path -Parent $PSScriptRoot
 
@@ -8,11 +9,15 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Push-Location $frontend
 try {
-    Write-Host "Running expo prebuild --platform android ..."
-    npx expo prebuild --platform android --no-install
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not (Test-Path (Join-Path $frontend "android"))) {
+        Write-Host "android/ folder missing, running prebuild ..."
+        npx expo prebuild --platform android --no-install
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } else {
+        Write-Host "Skipping prebuild to preserve existing Android signing config." -ForegroundColor Yellow
+    }
     Write-Host ""
-    Write-Host "Done. Rebuild and reinstall the APK on your phone:" -ForegroundColor Green
+    Write-Host "Done. Build next with:" -ForegroundColor Green
     Write-Host "  npm run build:android:aab" -ForegroundColor Cyan
     Write-Host "  OR: cd android; .\gradlew.bat assembleRelease" -ForegroundColor Cyan
 } finally {
