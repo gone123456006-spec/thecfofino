@@ -77,12 +77,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, [refreshActiveAccount]);
 
   useEffect(() => {
-    if (token) return;
+    // Keep watching auth storage even after login so account switches
+    // on the same device swap notification scope immediately.
     const id = setInterval(() => {
       void refreshActiveAccount();
     }, 2000);
     return () => clearInterval(id);
-  }, [token, refreshActiveAccount]);
+  }, [refreshActiveAccount]);
 
   const syncFromServer = useCallback(
     async (tkn: string, email: string) => {
