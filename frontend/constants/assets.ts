@@ -1,3 +1,6 @@
+/** Transparent clover logo — splash center (no white box). */
+export const SplashLogo = require('../assets/images/splash-icon.png');
+
 /** Header / login logo (Finovert). */
 export const HeaderLogo = require('../assets/images/header-logo.png');
 

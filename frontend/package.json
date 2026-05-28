@@ -12,6 +12,8 @@
     "build:ios:simulator": "npx eas-cli build --platform ios --profile simulator",
     "build:ios:production": "npx eas-cli build --platform ios --profile production",
     "clean:android": "powershell -ExecutionPolicy Bypass -File ./scripts/clean-android-build.ps1",
+    "prepare:splash": "node ./scripts/prepare-splash-icon.cjs",
+    "prebuild:android": "powershell -ExecutionPolicy Bypass -File ./scripts/regenerate-android-splash.ps1",
     "build:android:aab": "powershell -ExecutionPolicy Bypass -File ./scripts/build-aab.ps1"
   },
   "dependencies": {
@@ -59,10 +61,11 @@
     "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
-    "expo-dev-client": "~6.0.20",
     "@babel/core": "^7.20.0",
     "@types/react": "~19.1.10",
     "dotenv": "^17.3.1",
+    "expo-dev-client": "~6.0.20",
+    "jimp": "^1.6.1",
     "typescript": "^5.3.3"
   },
   "private": true

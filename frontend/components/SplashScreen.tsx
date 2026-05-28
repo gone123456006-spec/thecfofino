@@ -1,7 +1,15 @@
+import { Image } from 'expo-image';
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Image, LayoutChangeEvent, StyleSheet } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { HeaderLogo } from '@/constants/assets';
+import {
+  Animated,
+  Easing,
+  LayoutChangeEvent,
+  StyleSheet,
+  View,
+} from 'react-native';
+
+import { NavbarLogo } from '@/constants/assets';
+import { useScalers } from '@/utils/responsive';
 
 interface SplashScreenProps {
   onFinish?: () => void;
@@ -11,9 +19,17 @@ interface SplashScreenProps {
   duration?: number;
 }
 
-export function SplashScreen({ onFinish, onPainted, duration = 2400 }: SplashScreenProps) {
+/** Instagram / Amazon style: white screen, centered logo, “from” + wordmark at bottom. */
+export function SplashScreen({ onFinish, onPainted, duration = 2600 }: SplashScreenProps) {
   const paintedRef = useRef(false);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const { sw, width } = useScalers();
+
+  const wordmarkFade = useRef(new Animated.Value(0)).current;
+  const wordmarkScale = useRef(new Animated.Value(1)).current;
+  const zoomPulse = useRef(new Animated.Value(1)).current;
+
+  const wordmarkWidth = Math.min(width * 0.58, sw(220));
+  const wordmarkHeight = Math.round(wordmarkWidth * 0.22);
 
   const handleLayout = (_e: LayoutChangeEvent) => {
     if (paintedRef.current) return;
@@ -22,61 +38,87 @@ export function SplashScreen({ onFinish, onPainted, duration = 2400 }: SplashScr
   };
 
   useEffect(() => {
+    const wordmarkAnim = Animated.parallel([
+      Animated.timing(wordmarkFade, {
+        toValue: 1,
+        duration: 620,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(wordmarkScale, {
+        toValue: 1,
+        duration: 720,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]);
+
+    wordmarkAnim.start();
+
     const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.04,
-          duration: 900,
+        Animated.timing(zoomPulse, {
+          toValue: 1.02,
+          duration: 1200,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-        Animated.timing(pulseAnim, {
+        Animated.timing(zoomPulse, {
           toValue: 1,
-          duration: 900,
+          duration: 1200,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ]),
     );
-    const pulseDelay = setTimeout(() => pulse.start(), 400);
+    const pulseDelay = setTimeout(() => pulse.start(), 220);
 
     const end = setTimeout(() => onFinish?.(), duration);
 
     return () => {
       clearTimeout(pulseDelay);
       clearTimeout(end);
+      wordmarkAnim.stop();
       pulse.stop();
     };
-  }, [duration, pulseAnim, onFinish]);
+  }, [duration, onFinish, wordmarkFade, wordmarkScale, zoomPulse]);
 
   return (
-    <LinearGradient
-      colors={['#dbeafe', '#e3f2fd', '#ffffff', '#e1f5fe']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      locations={[0, 0.28, 0.58, 1]}
-      style={styles.container}
-      onLayout={handleLayout}>
-      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-        <Image
-          source={HeaderLogo}
-          style={styles.logo}
-          resizeMode="contain"
-          accessibilityLabel="Finovert Logo"
-        />
-      </Animated.View>
-    </LinearGradient>
+    <View style={styles.container} onLayout={handleLayout}>
+      <View style={styles.centerStage}>
+        <Animated.View
+          style={[
+            styles.wordmarkWrap,
+            {
+              opacity: wordmarkFade,
+              transform: [{ scale: Animated.multiply(wordmarkScale, zoomPulse) }],
+            },
+          ]}>
+          <Image
+            source={NavbarLogo}
+            style={{ width: wordmarkWidth, height: wordmarkHeight }}
+            contentFit="contain"
+            accessibilityLabel="Finovert logo"
+          />
+        </Animated.View>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#ffffff',
+  },
+  centerStage: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  logo: {
-    width: 220,
-    height: 110,
+  wordmarkWrap: {
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

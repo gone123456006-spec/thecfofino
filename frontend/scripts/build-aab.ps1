@@ -5,9 +5,13 @@ $frontend = Split-Path -Parent $PSScriptRoot
 Write-Host "=== Finovert AAB build ===" -ForegroundColor Cyan
 Write-Host "Stop Expo/Metro (npx expo start) in other terminals before continuing." -ForegroundColor Yellow
 
-& "$PSScriptRoot\clean-android-build.ps1"
-
 $android = Join-Path $frontend "android"
+
+Write-Host "Regenerating native Android splash (white + transparent logo)..."
+& "$PSScriptRoot\regenerate-android-splash.ps1"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& "$PSScriptRoot\clean-android-build.ps1"
 Push-Location $android
 try {
     Write-Host "Stopping Gradle daemons..."

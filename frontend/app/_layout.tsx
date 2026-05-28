@@ -54,7 +54,11 @@ function RootLayoutContent() {
     // SplashScreen.setOptions is not supported in Expo Go (would log a warning).
     if (Constants.appOwnership !== 'expo') {
       try {
-        SplashScreenNative.setOptions({ fade: true, duration: 280 });
+        SplashScreenNative.setOptions({
+          fade: true,
+          duration: 220,
+          backgroundColor: '#ffffff',
+        });
       } catch {
         /* older native module */
       }
@@ -72,7 +76,7 @@ function RootLayoutContent() {
     return (
       <>
         <SplashScreen
-          duration={2600}
+          duration={2800}
           onPainted={() => {
             void hideNativeSplash();
           }}

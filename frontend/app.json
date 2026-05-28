@@ -6,9 +6,9 @@
     "orientation": "portrait",
     "icon": "./assets/images/FinoC.png",
     "splash": {
-      "image": "./assets/images/FinoC.png",
+      "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#e3f2fd"
+      "backgroundColor": "#ffffff"
     },
     "scheme": "finovert",
     "userInterfaceStyle": "automatic",
@@ -53,13 +53,27 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/FinoC.png",
-          "imageWidth": 300,
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#e3f2fd",
+          "backgroundColor": "#ffffff",
+          "android": {
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 220,
+            "resizeMode": "contain",
+            "backgroundColor": "#ffffff"
+          },
+          "ios": {
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 220,
+            "resizeMode": "contain",
+            "backgroundColor": "#ffffff"
+          },
           "dark": {
-            "image": "./assets/images/FinoC.png",
-            "backgroundColor": "#0a1628"
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 220,
+            "resizeMode": "contain",
+            "backgroundColor": "#ffffff"
           }
         }
       ],
